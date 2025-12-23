@@ -44,10 +44,10 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
 
     return (
         <div className="flex flex-col md:flex-row h-screen bg-gray-900 text-white overflow-hidden">
-            {/* Sidebar - Players */}
-            <div className="w-full md:w-80 bg-gray-800 border-r border-gray-700 flex flex-col h-1/3 md:h-full">
-                {/* Current User Info */}
-                <div className="p-4 bg-gradient-to-r from-red-900/30 to-gray-800 border-b border-gray-700">
+            {/* Sidebar / Topbar - Players */}
+            <div className="w-full md:w-80 bg-gray-800 border-b md:border-b-0 md:border-r border-gray-700 flex flex-col shrink-0">
+                {/* Current User Info - Hidden or condensed on mobile to save space */}
+                <div className="hidden md:block p-4 bg-gradient-to-r from-red-900/30 to-gray-800 border-b border-gray-700">
                     <div className="flex items-center gap-3">
                         <div className="w-12 h-12 bg-red-600 rounded-full flex items-center justify-center font-bold text-lg shadow-lg">
                             {currentUser.name && currentUser.name.length > 0 ? currentUser.name[0].toUpperCase() : '?'}
@@ -59,8 +59,8 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
                     </div>
                 </div>
 
-                <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-800/50 backdrop-blur-md sticky top-0 z-10">
-                    <h3 className="font-bold flex items-center gap-2">
+                <div className="p-3 md:p-4 border-b border-gray-700 flex justify-between items-center bg-gray-800/50 backdrop-blur-md">
+                    <h3 className="font-bold flex items-center gap-2 text-sm md:text-base">
                         <User size={18} />
                         在線玩家 ({onlinePlayers.length})
                     </h3>
@@ -68,38 +68,47 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
                         <X size={20} />
                     </button>
                 </div>
-                <div className="flex-1 overflow-y-auto">
+
+                {/* Player List: Horizontal on mobile, Vertical on desktop */}
+                <div className="flex-1 overflow-x-auto md:overflow-y-auto flex md:flex-col p-2 md:p-0 gap-2 md:gap-0 min-h-[100px] md:min-h-0 items-center md:items-stretch">
                     {onlinePlayers.map(player => (
                         <div
                             key={player.id}
                             onClick={() => player.id !== currentUser.id && setSelectedPlayer(player)}
-                            className={`p-4 flex items-center justify-between cursor-pointer transition-colors border-b border-gray-700/50
-                ${player.id === currentUser.id ? 'opacity-60 cursor-default' : 'hover:bg-gray-700/50'}
-                ${selectedPlayer?.id === player.id ? 'bg-blue-600/20 border-l-4 border-l-blue-500' : ''}
-              `}
+                            className={`
+                                shrink-0 p-3 md:p-4 flex flex-col md:flex-row items-center md:justify-between cursor-pointer transition-all border border-gray-700/50 md:border-0 md:border-b md:border-gray-700/50 rounded-xl md:rounded-none
+                                ${player.id === currentUser.id ? 'bg-gray-700/30 opacity-80 cursor-default' : 'hover:bg-gray-700/50'}
+                                ${selectedPlayer?.id === player.id ? 'bg-blue-600/20 ring-2 ring-blue-500 md:ring-0 md:border-l-4 md:border-l-blue-500' : ''}
+                                min-w-[100px] md:min-w-0
+                            `}
                         >
-                            <div className="flex items-center gap-3">
-                                <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold shadow-inner ${player.id === currentUser.id ? 'bg-gray-600' : 'bg-red-600'}`}>
+                            <div className="flex flex-col md:flex-row items-center gap-2 md:gap-3 text-center md:text-left">
+                                <div className={`relative w-10 h-10 md:w-10 md:h-10 rounded-full flex items-center justify-center font-bold shadow-inner ${player.id === currentUser.id ? 'bg-gray-600' : 'bg-red-600'}`}>
                                     {player.name && player.name.length > 0 ? player.name[0].toUpperCase() : '?'}
+                                    <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 border-2 border-gray-800 rounded-full"></div>
                                 </div>
-                                <div className="flex flex-col">
-                                    <span className="font-medium">{player.name || player.id} {player.id === currentUser.id ? '(你)' : ''}</span>
-                                    <span className="text-xs text-gray-500">ID: {player.id}</span>
-                                    <span className="text-xs text-gray-500">勝率: {player.wins + player.losses > 0 ? Math.round((player.wins / (player.wins + player.losses)) * 100) : 0}%</span>
+                                <div className="flex flex-col overflow-hidden max-w-[80px] md:max-w-none">
+                                    <span className="font-medium text-xs md:text-sm truncate">{player.name || player.id}{player.id === currentUser.id ? '(你)' : ''}</span>
+                                    <span className="hidden md:block text-[10px] text-gray-500 truncate">ID: {player.id}</span>
+                                    <span className="text-[10px] text-gray-500">勝率: {player.wins + player.losses > 0 ? Math.round((player.wins / (player.wins + player.losses)) * 100) : 0}%</span>
                                 </div>
                             </div>
-                            {player.id !== currentUser.id && (
-                                <button
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        onSendChallenge(player.id);
-                                    }}
-                                    className="p-2 bg-red-600 hover:bg-red-700 rounded-lg text-white transition-all transform active:scale-95 shadow-md shadow-red-900/20"
-                                    title="發起挑戰"
-                                >
-                                    <Swords size={18} />
-                                </button>
-                            )}
+
+                            {/* Challenge Button - Desktop only, or show on selective click for mobile */}
+                            <div className="hidden md:block">
+                                {player.id !== currentUser.id && (
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            onSendChallenge(player.id);
+                                        }}
+                                        className="p-2 bg-red-600 hover:bg-red-700 rounded-lg text-white transition-all transform active:scale-95 shadow-md shadow-red-900/20"
+                                        title="發起挑戰"
+                                    >
+                                        <Swords size={18} />
+                                    </button>
+                                )}
+                            </div>
                         </div>
                     ))}
                 </div>
