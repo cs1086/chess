@@ -101,8 +101,8 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
                                 </div>
                             </div>
 
-                            {/* Challenge Button - Desktop only, or show on selective click for mobile */}
-                            <div className="hidden md:block">
+                            {/* Challenge/Spectate Buttons - Always on desktop, show when selected on mobile */}
+                            <div className={`${selectedPlayer?.id === player.id ? 'flex' : 'hidden'} md:flex mt-2 md:mt-0`}>
                                 {player.id !== currentUser.id && (
                                     <div className="flex gap-2">
                                         {player.activeGameId ? (
@@ -138,15 +138,39 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
 
             {/* Main Chat Area */}
             <div className="flex-1 flex flex-col bg-gray-900/50 backdrop-blur-xl relative">
-                <div className="p-4 bg-gray-800/30 border-b border-gray-700 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
+                <div className="p-3 md:p-4 bg-gray-800/30 border-b border-gray-700 flex items-center justify-between gap-2 overflow-x-auto">
+                    <div className="flex items-center gap-2 shrink-0">
                         <div className={`w-3 h-3 rounded-full bg-green-500 animate-pulse`}></div>
-                        <span className="font-bold">世界聊天 {selectedPlayer ? ` > 與 ${selectedPlayer.name} 私聊` : ''}</span>
+                        <span className="font-bold text-sm md:text-base whitespace-nowrap">
+                            {selectedPlayer ? `對 ${selectedPlayer.name} 私聊` : '世界聊天'}
+                        </span>
                     </div>
+
                     {selectedPlayer && (
-                        <button onClick={() => setSelectedPlayer(null)} className="text-xs bg-gray-700 px-2 py-1 rounded-md hover:bg-gray-600 transition-all">
-                            回復公開頻道
-                        </button>
+                        <div className="flex items-center gap-2">
+                            {selectedPlayer.activeGameId ? (
+                                <button
+                                    onClick={() => onJoinSpectate(selectedPlayer.activeGameId!)}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 rounded-lg text-xs font-bold transition-all"
+                                >
+                                    <Eye size={14} /> 觀戰
+                                </button>
+                            ) : (
+                                <button
+                                    onClick={() => onSendChallenge(selectedPlayer.id)}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 hover:bg-red-700 rounded-lg text-xs font-bold transition-all"
+                                >
+                                    <Swords size={14} /> 挑戰
+                                </button>
+                            )}
+                            <button
+                                onClick={() => setSelectedPlayer(null)}
+                                className="p-1.5 bg-gray-700 hover:bg-gray-600 rounded-lg transition-all"
+                                title="返回公開頻道"
+                            >
+                                <X size={14} />
+                            </button>
+                        </div>
                     )}
                 </div>
 
