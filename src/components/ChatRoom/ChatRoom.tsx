@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import type { UserProfile, ChatMessage, Challenge } from '../../types';
-import { Send, User, Swords, Shield, X } from 'lucide-react';
+import { Send, User, Swords, Shield, X, Eye } from 'lucide-react';
 
 interface ChatRoomProps {
     currentUser: UserProfile;
@@ -8,6 +8,7 @@ interface ChatRoomProps {
     messages: ChatMessage[];
     onSendMessage: (content: string, to?: string) => void;
     onSendChallenge: (toId: string) => void;
+    onJoinSpectate: (gameId: string) => void;
     onLeave: () => void;
     receivedChallenge?: Challenge;
     onAcceptChallenge: (challenge: Challenge) => void;
@@ -20,6 +21,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     messages,
     onSendMessage,
     onSendChallenge,
+    onJoinSpectate,
     onLeave,
     receivedChallenge,
     onAcceptChallenge,
@@ -88,7 +90,12 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
                                     <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 border-2 border-gray-800 rounded-full"></div>
                                 </div>
                                 <div className="flex flex-col overflow-hidden max-w-[80px] md:max-w-none">
-                                    <span className="font-medium text-xs md:text-sm truncate">{player.name || player.id}{player.id === currentUser.id ? '(你)' : ''}</span>
+                                    <div className="flex items-center gap-1">
+                                        <span className="font-medium text-xs md:text-sm truncate">{player.name || player.id}{player.id === currentUser.id ? '(你)' : ''}</span>
+                                        {player.activeGameId && (
+                                            <span className="text-[9px] bg-red-900/40 text-red-400 px-1 rounded border border-red-500/20 shrink-0">對戰中</span>
+                                        )}
+                                    </div>
                                     <span className="hidden md:block text-[10px] text-gray-500 truncate">ID: {player.id}</span>
                                     <span className="text-[10px] text-gray-500">勝率: {player.wins + player.losses > 0 ? Math.round((player.wins / (player.wins + player.losses)) * 100) : 0}%</span>
                                 </div>
@@ -97,16 +104,31 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
                             {/* Challenge Button - Desktop only, or show on selective click for mobile */}
                             <div className="hidden md:block">
                                 {player.id !== currentUser.id && (
-                                    <button
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            onSendChallenge(player.id);
-                                        }}
-                                        className="p-2 bg-red-600 hover:bg-red-700 rounded-lg text-white transition-all transform active:scale-95 shadow-md shadow-red-900/20"
-                                        title="發起挑戰"
-                                    >
-                                        <Swords size={18} />
-                                    </button>
+                                    <div className="flex gap-2">
+                                        {player.activeGameId ? (
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    onJoinSpectate(player.activeGameId!);
+                                                }}
+                                                className="p-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white transition-all transform active:scale-95 shadow-md shadow-blue-900/20"
+                                                title="觀戰"
+                                            >
+                                                <Eye size={18} />
+                                            </button>
+                                        ) : (
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    onSendChallenge(player.id);
+                                                }}
+                                                className="p-2 bg-red-600 hover:bg-red-700 rounded-lg text-white transition-all transform active:scale-95 shadow-md shadow-red-900/20"
+                                                title="發起挑戰"
+                                            >
+                                                <Swords size={18} />
+                                            </button>
+                                        )}
+                                    </div>
                                 )}
                             </div>
                         </div>

@@ -23,7 +23,8 @@ const App: React.FC = () => {
     handleFlip,
     surrender,
     requestRematch,
-    exitGame
+    exitGame,
+    joinSpectate
   } = useFirebase(storedUserId);
 
   useEffect(() => {
@@ -63,6 +64,7 @@ const App: React.FC = () => {
         messages={messages}
         onSendMessage={sendMessage}
         onSendChallenge={sendChallenge}
+        onJoinSpectate={joinSpectate}
         onLeave={() => toggleChatRoom(false)}
         receivedChallenge={receivedChallenge || undefined}
         onAcceptChallenge={acceptChallenge}

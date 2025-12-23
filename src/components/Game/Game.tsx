@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import type { GameState, PieceColor } from '../../types';
 import { Board } from '../Board/Board';
 import { Piece } from '../Piece/Piece';
-import { Timer, Flag, RefreshCw } from 'lucide-react';
+import { Timer, Flag, RefreshCw, Users } from 'lucide-react';
 import { sortCapturedPieces } from '../../utils/gameLogic';
 
 interface GameProps {
@@ -30,8 +30,9 @@ export const Game: React.FC<GameProps> = ({
 
     const isRed = gameState.players.red?.id === currentUserId;
     const isBlack = gameState.players.black?.id === currentUserId;
+    const isSpectator = !isRed && !isBlack;
     const playerColor: PieceColor | null = isRed ? 'red' : (isBlack ? 'black' : null);
-    const isMyTurn = gameState.currentPlayer === playerColor && gameState.gameStatus === 'playing';
+    const isMyTurn = !isSpectator && gameState.currentPlayer === playerColor && gameState.gameStatus === 'playing';
 
     const isTimerEnabled = import.meta.env.VITE_ENABLE_TIMER === 'true';
 
@@ -52,7 +53,7 @@ export const Game: React.FC<GameProps> = ({
     }, [gameState.currentPlayer, gameState.turnStartTime, gameState.gameStatus, isTimerEnabled]);
 
     const handleSquareClick = (index: number) => {
-        if (!isMyTurn) return;
+        if (!isMyTurn || isSpectator) return;
 
         const piece = gameState.board[index];
 
@@ -123,6 +124,34 @@ export const Game: React.FC<GameProps> = ({
         );
     };
 
+    const SpectatorList = () => {
+        const spectators = gameState.spectators || [];
+        return (
+            <div className="bg-black/20 rounded-xl p-4 border border-white/5 w-full mt-4">
+                <div className="flex items-center gap-2 mb-3 text-orange-500/80">
+                    <Users size={18} />
+                    <span className="font-bold text-sm tracking-widest">觀眾席 ({spectators.length})</span>
+                </div>
+                <div className="flex flex-wrap gap-3">
+                    {spectators.map(s => (
+                        <div key={s.id} className="flex items-center gap-2 bg-gray-800/50 px-3 py-2 rounded-xl border border-gray-700/50 shadow-sm">
+                            <div className="w-8 h-8 bg-gradient-to-br from-gray-700 to-gray-800 rounded-full flex items-center justify-center text-xs font-bold text-orange-400 border border-orange-500/20">
+                                {s.name && s.name.length > 0 ? s.name[0].toUpperCase() : '?'}
+                            </div>
+                            <div className="flex flex-col">
+                                <span className="text-xs font-bold text-gray-200">{s.name}</span>
+                                <span className="text-[10px] text-gray-500 font-mono">W:{s.wins} L:{s.losses}</span>
+                            </div>
+                        </div>
+                    ))}
+                    {spectators.length === 0 && (
+                        <span className="text-xs text-gray-600 italic py-2">目前尚無觀眾...</span>
+                    )}
+                </div>
+            </div>
+        );
+    };
+
     const opponentColor = playerColor === 'red' ? 'black' : 'red';
     const myColor = playerColor || 'red';
 
@@ -173,12 +202,15 @@ export const Game: React.FC<GameProps> = ({
                             {gameState.gameStatus === 'ended' && (
                                 <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-md rounded-xl flex flex-col items-center justify-center p-8 text-center animate-in zoom-in duration-300">
                                     <div className="text-4xl md:text-6xl font-black mb-4 tracking-widest uppercase italic text-orange-500 drop-shadow-2xl">
-                                        {gameState.winner === playerColor ? '獲勝!' : '敗北!'}
+                                        {isSpectator
+                                            ? `${gameState.winner === 'red' ? '紅方' : '黑方'} 獲勝!`
+                                            : (gameState.winner === playerColor ? '獲勝!' : '敗北!')
+                                        }
                                     </div>
                                     <p className="text-gray-400 mb-8 font-serif">勝敗乃兵家常事，少俠請重新來過。</p>
 
                                     <div className="flex flex-col gap-3 w-full max-w-[200px]">
-                                        {!gameState.rematch?.[myColor] ? (
+                                        {!isSpectator && !gameState.rematch?.[myColor] ? (
                                             <button
                                                 onClick={onRematch}
                                                 className="w-full py-4 bg-red-700 hover:bg-red-600 text-white rounded-2xl font-bold transition-all transform active:scale-95 shadow-xl shadow-red-900/40 border border-red-500/30 flex items-center justify-center gap-2"
@@ -186,11 +218,11 @@ export const Game: React.FC<GameProps> = ({
                                                 <RefreshCw size={20} />
                                                 再戰一局
                                             </button>
-                                        ) : (
-                                            <div className="w-full py-4 bg-orange-900/20 text-orange-400 rounded-2xl font-bold border border-orange-900/50 animate-pulse">
+                                        ) : !isSpectator ? (
+                                            <div className="w-full py-4 bg-orange-900/20 text-orange-400 rounded-2xl font-bold border border-orange-900/50 animate-pulse text-center">
                                                 等待對手...
                                             </div>
-                                        )}
+                                        ) : null}
                                         <button
                                             onClick={onExit}
                                             className="w-full py-3 bg-gray-800 hover:bg-gray-700 text-gray-400 rounded-2xl font-medium transition-all"
@@ -229,12 +261,12 @@ export const Game: React.FC<GameProps> = ({
                         {/* Footer Actions */}
                         <div className="flex justify-between items-center gap-4 px-2">
                             <button
-                                onClick={onSurrender}
-                                disabled={gameState.gameStatus !== 'playing'}
-                                className="flex items-center justify-center gap-2 px-6 py-3 bg-gray-900/50 hover:bg-gray-800 rounded-xl text-gray-400 hover:text-white transition-all disabled:opacity-30 border border-gray-800"
+                                onClick={isSpectator ? onExit : onSurrender}
+                                disabled={!isSpectator && gameState.gameStatus !== 'playing'}
+                                className="flex items-center justify-center gap-2 px-6 py-3 bg-gray-900/50 hover:bg-gray-800 rounded-xl text-gray-400 hover:text-white transition-all disabled:opacity-30 border border-gray-800 shrink-0"
                             >
                                 <Flag size={18} />
-                                投降
+                                {isSpectator ? '退出觀戰' : '投降'}
                             </button>
 
                             <div className="flex-1 text-center">
@@ -252,6 +284,9 @@ export const Game: React.FC<GameProps> = ({
                         <CapturedList color={myColor} title="俘虜" />
                     </div>
                 </div>
+
+                {/* Spectator List at the bottom */}
+                <SpectatorList />
             </div>
         </div>
     );

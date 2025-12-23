@@ -32,6 +32,7 @@ export interface GameState {
     red?: boolean;
     black?: boolean;
   };
+  spectators?: UserProfile[];
 }
 
 export interface PlayerInfo {
@@ -47,6 +48,7 @@ export interface UserProfile {
   lastOnline: number;
   inChatRoom: boolean;
   isOnline: boolean;
+  activeGameId?: string;
 }
 
 export interface ChatMessage {

@@ -125,9 +125,14 @@ export const useFirebase = (initialUserId: string | null) => {
                 const rawBoard = data.board || [];
                 // Ensure board is always a proper 32-element array even if Firebase returns it as an object
                 const normalizedBoard = Array.from({ length: 32 }, (_, i) => rawBoard[i] || null);
+
+                // Normalize spectators from object to array
+                const spectators = data.spectators ? Object.values(data.spectators) as UserProfile[] : [];
+
                 setGameState({
                     ...data,
-                    board: normalizedBoard
+                    board: normalizedBoard,
+                    spectators
                 } as GameState);
             }
         });
@@ -189,6 +194,22 @@ export const useFirebase = (initialUserId: string | null) => {
         update(ref(db, `challenges/${user!.id}`), { status: 'accepted', gameId });
         update(ref(db, `challenges/${challenge.fromId}`), { status: 'accepted', gameId });
 
+        setCurrentGameId(gameId);
+        update(ref(db, `users/${user!.id}`), { activeGameId: gameId });
+        update(ref(db, `users/${challenge.fromId}`), { activeGameId: gameId });
+        toggleChatRoom(false);
+    };
+
+    const joinSpectate = (gameId: string) => {
+        if (!user || !user.id) return;
+        const spectatorRef = ref(db, `games/${gameId}/spectators/${user.id}`);
+        set(spectatorRef, {
+            id: user.id,
+            name: user.name,
+            wins: user.wins,
+            losses: user.losses
+        });
+        update(ref(db, `users/${user.id}`), { activeGameId: gameId });
         setCurrentGameId(gameId);
         toggleChatRoom(false);
     };
@@ -316,6 +337,14 @@ export const useFirebase = (initialUserId: string | null) => {
     };
 
     const exitGame = () => {
+        if (!user || !user.id || !currentGameId) return;
+
+        // Remove from spectators just in case
+        remove(ref(db, `games/${currentGameId}/spectators/${user.id}`));
+
+        // Clear activeGameId
+        update(ref(db, `users/${user.id}`), { activeGameId: null });
+
         setCurrentGameId(null);
         toggleChatRoom(true);
     };
@@ -336,6 +365,7 @@ export const useFirebase = (initialUserId: string | null) => {
         handleFlip,
         surrender,
         requestRematch,
-        exitGame
+        exitGame,
+        joinSpectate
     };
 };
