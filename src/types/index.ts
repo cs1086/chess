@@ -34,6 +34,7 @@ export interface GameState {
   };
   spectators?: UserProfile[];
   endReason?: 'normal' | 'surrender' | 'runaway';
+  isColorAssigned?: boolean;
 }
 
 export interface PlayerInfo {

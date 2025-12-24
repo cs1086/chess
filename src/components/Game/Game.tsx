@@ -163,7 +163,8 @@ export const Game: React.FC<GameProps> = ({
     };
 
     const opponentColor = playerColor === 'red' ? 'black' : 'red';
-    const myColor = playerColor || 'red';
+    const bottomColor = playerColor || 'red'; // Spectator defaults to Red at bottom
+    const topColor = isSpectator ? 'black' : opponentColor;
 
     return (
         <div className="min-h-screen bg-[#1a120b] text-[#e8d5c4] flex flex-col items-center p-4 md:p-8 animate-in fade-in duration-500">
@@ -186,9 +187,9 @@ export const Game: React.FC<GameProps> = ({
             <div className="w-full max-w-lg md:max-w-6xl flex flex-col gap-4 md:gap-6">
                 {/* Info Bar */}
                 <div className="flex justify-between items-center px-4 max-w-4xl mx-auto w-full">
-                    {getPlayerDisplay(opponentColor)}
+                    {getPlayerDisplay(topColor)}
                     <div className="text-gray-600 italic text-sm font-serif">VS</div>
-                    {getPlayerDisplay(myColor)}
+                    {getPlayerDisplay(bottomColor)}
                 </div>
 
                 {/* Main Content Area (Captured - Board - Captured) */}
@@ -220,7 +221,7 @@ export const Game: React.FC<GameProps> = ({
                                     <p className="text-gray-400 mb-8 font-serif">勝敗乃兵家常事，少俠請重新來過。</p>
 
                                     <div className="flex flex-col gap-3 w-full max-w-[200px]">
-                                        {!isSpectator && !gameState.rematch?.[myColor] ? (
+                                        {!isSpectator && !gameState.rematch?.[bottomColor as keyof typeof gameState.rematch] ? (
                                             <button
                                                 onClick={onRematch}
                                                 className="w-full py-4 bg-red-700 hover:bg-red-600 text-white rounded-2xl font-bold transition-all transform active:scale-95 shadow-xl shadow-red-900/40 border border-red-500/30 flex items-center justify-center gap-2"
@@ -249,7 +250,7 @@ export const Game: React.FC<GameProps> = ({
                             <div className="flex flex-col bg-black/20 rounded-xl p-2 border border-white/5">
                                 <span className="text-[10px] text-white/50 mb-1">對手俘虜</span>
                                 <div className="flex flex-wrap gap-1">
-                                    {sortCapturedPieces(Object.values(gameState.capturedPieces?.[opponentColor] || {})).map((piece, i) => (
+                                    {sortCapturedPieces(Object.values(gameState.capturedPieces?.[topColor as keyof typeof gameState.capturedPieces] || {})).map((piece, i) => (
                                         <div key={`mob-opp-${i}`} className="w-8 h-8 opacity-95">
                                             <Piece piece={{ ...piece, isFlipped: true }} variant="captured" />
                                         </div>
@@ -259,7 +260,7 @@ export const Game: React.FC<GameProps> = ({
                             <div className="flex flex-col bg-black/20 rounded-xl p-2 border border-white/5">
                                 <span className="text-[10px] text-white/50 mb-1">我方俘虜</span>
                                 <div className="flex flex-wrap gap-1">
-                                    {sortCapturedPieces(Object.values(gameState.capturedPieces?.[myColor] || {})).map((piece, i) => (
+                                    {sortCapturedPieces(Object.values(gameState.capturedPieces?.[bottomColor as keyof typeof gameState.capturedPieces] || {})).map((piece, i) => (
                                         <div key={`mob-me-${i}`} className="w-8 h-8 opacity-95">
                                             <Piece piece={{ ...piece, isFlipped: true }} variant="captured" />
                                         </div>
@@ -291,7 +292,7 @@ export const Game: React.FC<GameProps> = ({
 
                     {/* Right: My captured pieces */}
                     <div className="hidden sm:block">
-                        <CapturedList color={myColor} title="俘虜" />
+                        <CapturedList color={bottomColor} title="俘虜" />
                     </div>
                 </div>
 

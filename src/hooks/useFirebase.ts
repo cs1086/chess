@@ -6,7 +6,6 @@ import { initializeBoard, canCapture, isValidMove, checkWinner } from '../utils/
 
 const ADMIN_ID = 'mouse530';
 
-// Generate a simple unique session ID
 const generateSessionId = () => Math.random().toString(36).substring(2, 15);
 
 export const useFirebase = (initialUserId: string | null) => {
@@ -21,13 +20,10 @@ export const useFirebase = (initialUserId: string | null) => {
 
     const isAdmin = initialUserId === ADMIN_ID;
 
-    // User Profile & Online Status
     useEffect(() => {
         if (!initialUserId) return;
 
         const userRef = ref(db, `users/${initialUserId}`);
-
-        // Check if user exists, if not create
         const unsubscribeUser = onValue(userRef, (snapshot) => {
             if (!snapshot.exists()) {
                 const newUser: UserProfile = {
@@ -46,15 +42,12 @@ export const useFirebase = (initialUserId: string | null) => {
                 set(userRef, newUser);
             } else {
                 const userData = snapshot.val() as UserProfile;
-
-                // Session Conflict Logic
                 if (!isAdmin && userData.sessionId && userData.sessionId !== mySessionId && userData.isOnline) {
                     alert('您的帳號已在其他地方登入。您將被強制登出。');
                     localStorage.removeItem('chess_userId');
                     window.location.reload();
                     return;
                 }
-
                 setUser({
                     ...userData,
                     id: initialUserId,
@@ -63,30 +56,23 @@ export const useFirebase = (initialUserId: string | null) => {
                     surrenders: userData.surrenders || 0,
                     runaways: userData.runaways || 0
                 });
-
-                // Restore active game if exists (Admin doesn't play)
                 if (!isAdmin && userData.activeGameId && !currentGameId) {
                     setCurrentGameId(userData.activeGameId);
                 }
             }
         });
 
-        // Handle online status
         const statusRef = ref(db, `users/${initialUserId}`);
-
-        // Reset inChatRoom on refresh/mount and update sessionId
         update(statusRef, {
             isOnline: true,
             inChatRoom: false,
             sessionId: mySessionId
         });
-
         onDisconnect(statusRef).update({
             isOnline: false,
             lastOnline: Date.now()
         });
 
-        // Leaderboard and online players
         const allUsersRef = ref(db, 'users');
         const unsubscribeAllUsers = onValue(allUsersRef, (snapshot) => {
             const data = snapshot.val();
@@ -104,19 +90,15 @@ export const useFirebase = (initialUserId: string | null) => {
                         rejections: val.rejections || 0
                     };
                 });
-
-                // Admin logic: 
                 setLeaderboard(users.filter(u => u.id !== ADMIN_ID && (u.wins + u.losses > 0)).sort((a, b) => {
                     const winRateA = (a.wins + a.losses > 0) ? (a.wins / (a.wins + a.losses)) : 0;
                     const winRateB = (b.wins + b.losses > 0) ? (b.wins / (b.wins + b.losses)) : 0;
-
                     if (winRateB !== winRateA) return winRateB - winRateA;
                     if (a.runaways !== b.runaways) return a.runaways - b.runaways;
                     if (a.surrenders !== b.surrenders) return a.surrenders - b.surrenders;
                     if (a.rejections !== b.rejections) return a.rejections - b.rejections;
-                    return b.wins - a.wins; // Final tie-breaker
+                    return b.wins - a.wins;
                 }).slice(0, 10));
-
                 setOnlinePlayers(users.filter(u => u.isOnline === true && (u.inChatRoom || u.activeGameId) && u.id !== ADMIN_ID));
             }
         });
@@ -127,26 +109,21 @@ export const useFirebase = (initialUserId: string | null) => {
         };
     }, [initialUserId, mySessionId, isAdmin, currentGameId]);
 
-    // Chat & Challenges
     useEffect(() => {
         if (!user || !user.inChatRoom) {
             setMessages([]);
             setReceivedChallenge(null);
             return;
         }
-
         const messagesRef = ref(db, 'chat/messages');
         const unsubscribeMessages = onValue(messagesRef, (snapshot) => {
             const data = snapshot.val();
             if (data) {
                 const msgs = Object.values(data) as ChatMessage[];
-                setMessages(msgs.slice(-50)); // Last 50 messages
+                setMessages(msgs.slice(-50));
             }
         });
-
-        // Admin doesn't receive challenges
         if (isAdmin) return;
-
         const challengesRef = ref(db, `challenges/${user.id}`);
         const unsubscribeChallenges = onValue(challengesRef, (snapshot) => {
             const data = snapshot.val();
@@ -155,7 +132,7 @@ export const useFirebase = (initialUserId: string | null) => {
                 if (challengeData.status === 'accepted' && challengeData.gameId) {
                     setCurrentGameId(challengeData.gameId);
                     toggleChatRoom(false);
-                    remove(challengesRef); // Clean up
+                    remove(challengesRef);
                 } else {
                     setReceivedChallenge(challengeData);
                 }
@@ -163,20 +140,17 @@ export const useFirebase = (initialUserId: string | null) => {
                 setReceivedChallenge(null);
             }
         });
-
         return () => {
             unsubscribeMessages();
             unsubscribeChallenges();
         };
     }, [user?.inChatRoom, isAdmin, user?.id]);
 
-    // Game State Sync
     useEffect(() => {
         if (!currentGameId) {
             setGameState(null);
             return;
         }
-
         const gameRef = ref(db, `games/${currentGameId}`);
         const unsubscribeGame = onValue(gameRef, (snapshot) => {
             const data = snapshot.val();
@@ -184,7 +158,6 @@ export const useFirebase = (initialUserId: string | null) => {
                 const rawBoard = data.board || [];
                 const normalizedBoard = Array.from({ length: 32 }, (_, i) => rawBoard[i] || null);
                 const spectators = data.spectators ? Object.values(data.spectators) as UserProfile[] : [];
-
                 setGameState({
                     ...data,
                     board: normalizedBoard,
@@ -192,17 +165,13 @@ export const useFirebase = (initialUserId: string | null) => {
                 } as GameState);
             }
         });
-
         return () => unsubscribeGame();
     }, [currentGameId]);
 
-    // Handle "Runaway" or "Surrender" detection and auto-exit for everyone
     useEffect(() => {
         if (!gameState || gameState.gameStatus !== 'ended' || !user || isAdmin) return;
-
         const isPlayer = gameState.players.red?.id === user.id || gameState.players.black?.id === user.id;
         const reason = gameState.endReason;
-
         if (reason === 'runaway') {
             if (isPlayer) {
                 const isWinner = (gameState.players.red?.id === user.id && gameState.winner === 'red') ||
@@ -222,22 +191,17 @@ export const useFirebase = (initialUserId: string | null) => {
         }
     }, [gameState?.gameStatus, gameState?.endReason, user?.id, isAdmin, gameState?.players.red?.id, gameState?.players.black?.id, gameState?.winner]);
 
-    // Handle players leaving after game ends
     useEffect(() => {
         if (isAdmin || !gameState || gameState.gameStatus !== 'ended' || !user || !currentGameId) return;
         if (gameState.endReason === 'runaway' || gameState.endReason === 'surrender') return;
-
         const isPlayer = gameState.players.red?.id === user.id || gameState.players.black?.id === user.id;
-
         if (isPlayer) {
-            // Player monitoring opponent
             const opponentId = gameState.players.red?.id === user.id ? gameState.players.black?.id : gameState.players.red?.id;
             if (!opponentId) return;
             const opponentRef = ref(db, `users/${opponentId}`);
             const unsubscribeOpponent = onValue(opponentRef, (snapshot) => {
                 const opponentData = snapshot.val() as UserProfile;
                 if (opponentData) {
-                    // Only alert if they actually changed their activeGameId (not just offline)
                     if (opponentData.activeGameId !== currentGameId) {
                         alert('對手已離開或不願意續戰，系統將自動帶您回聊天室。');
                         exitGame();
@@ -246,21 +210,16 @@ export const useFirebase = (initialUserId: string | null) => {
             });
             return () => unsubscribeOpponent();
         } else {
-            // Spectator monitoring BOTH players
             const redId = gameState.players.red?.id;
             const blackId = gameState.players.black?.id;
             if (!redId || !blackId) return;
-
             const checkPlayers = () => {
-                // Fetch latest data for both players
                 const redRef = ref(db, `users/${redId}`);
                 const blackRef = ref(db, `users/${blackId}`);
-
                 onValue(redRef, (redSnap) => {
                     const redData = redSnap.val() as UserProfile;
                     onValue(blackRef, (blackSnap) => {
                         const blackData = blackSnap.val() as UserProfile;
-                        // For spectators: ONLY kick if BOTH players have actually left the room
                         if (redData && blackData && redData.activeGameId !== currentGameId && blackData.activeGameId !== currentGameId) {
                             alert('對戰雙方均已離開，系統將自動帶您回聊天室。');
                             exitGame();
@@ -268,30 +227,23 @@ export const useFirebase = (initialUserId: string | null) => {
                     }, { onlyOnce: true });
                 }, { onlyOnce: true });
             };
-
             const unsubRed = onValue(ref(db, `users/${redId}`), checkPlayers);
             const unsubBlack = onValue(ref(db, `users/${blackId}`), checkPlayers);
             return () => { unsubRed(); unsubBlack(); };
         }
     }, [gameState?.gameStatus, currentGameId, user?.id, isAdmin, gameState?.endReason, gameState?.players.red?.id, gameState?.players.black?.id]);
 
-    // Runaway Monitoring (2 minutes timeout)
     useEffect(() => {
         if (isAdmin || !gameState || gameState.gameStatus !== 'playing' || !user || !currentGameId) return;
-
-        const opponentId = gameState.players.red?.id === user.id
-            ? gameState.players.black?.id
-            : gameState.players.red?.id;
-
+        const opponentId = gameState.players.red?.id === user.id ? gameState.players.black?.id : gameState.players.red?.id;
         if (!opponentId) return;
-
         const checkRunaway = () => {
             const opponentRef = ref(db, `users/${opponentId}`);
             onValue(opponentRef, (snapshot) => {
                 const opponentData = snapshot.val() as UserProfile;
                 if (opponentData && !opponentData.isOnline) {
                     const offlineDuration = Date.now() - (opponentData.lastOnline || 0);
-                    if (offlineDuration >= 120000) { // 2 minutes
+                    if (offlineDuration >= 120000) {
                         const winnerColor = gameState.players.red?.id === user.id ? 'red' : 'black';
                         update(ref(db, `games/${currentGameId}`), {
                             gameStatus: 'ended',
@@ -303,8 +255,7 @@ export const useFirebase = (initialUserId: string | null) => {
                 }
             }, { onlyOnce: true });
         };
-
-        const interval = setInterval(checkRunaway, 10000); // Check every 10 seconds
+        const interval = setInterval(checkRunaway, 10000);
         return () => clearInterval(interval);
     }, [gameState?.gameStatus, currentGameId, user?.id, isAdmin, gameState?.players.red?.id, gameState?.players.black?.id]);
 
@@ -325,11 +276,7 @@ export const useFirebase = (initialUserId: string | null) => {
             content,
             timestamp: Date.now(),
         };
-
-        if (to) {
-            newMessage.to = to;
-        }
-
+        if (to) newMessage.to = to;
         push(ref(db, 'chat/messages'), newMessage);
     };
 
@@ -350,7 +297,6 @@ export const useFirebase = (initialUserId: string | null) => {
         if (isAdmin) return;
         const gameId = `${challenge.fromId}_${challenge.toId}_${Date.now()}`;
         const initialBoard = initializeBoard();
-
         const challenger = onlinePlayers.find(p => p.id === challenge.fromId);
         const challenged = onlinePlayers.find(p => p.id === challenge.toId);
 
@@ -372,13 +318,13 @@ export const useFirebase = (initialUserId: string | null) => {
                 }
             },
             gameStatus: 'playing',
-            turnStartTime: Date.now()
+            turnStartTime: Date.now(),
+            isColorAssigned: false
         };
 
         set(ref(db, `games/${gameId}`), newGame);
         update(ref(db, `challenges/${user!.id}`), { status: 'accepted', gameId });
         update(ref(db, `challenges/${challenge.fromId}`), { status: 'accepted', gameId });
-
         setCurrentGameId(gameId);
         update(ref(db, `users/${user!.id}`), { activeGameId: gameId });
         update(ref(db, `users/${challenge.fromId}`), { activeGameId: gameId });
@@ -406,43 +352,36 @@ export const useFirebase = (initialUserId: string | null) => {
     };
 
     const handleMove = (from: number, to: number) => {
-        if (isAdmin || !gameState || !currentGameId) return;
+        if (isAdmin || !gameState || !currentGameId || !user) return;
+        const playerColor = gameState.players.red?.id === user.id ? 'red' :
+            gameState.players.black?.id === user.id ? 'black' : null;
+
+        if (gameState.currentPlayer !== playerColor) return;
+
         const currentCaptured = gameState.capturedPieces || { red: [], black: [] };
         const capturedPieces = {
             red: Array.isArray(currentCaptured.red) ? [...currentCaptured.red] : Object.values(currentCaptured.red || {}),
             black: Array.isArray(currentCaptured.black) ? [...currentCaptured.black] : Object.values(currentCaptured.black || {})
         };
-
         const board = [...gameState.board];
         const attacker = board[from];
         const target = board[to];
-
         if (!attacker) return;
-
         if (target) {
             if (canCapture(attacker, target, board)) {
-                if (gameState.currentPlayer === 'red') {
-                    capturedPieces.red.push(target);
-                } else {
-                    capturedPieces.black.push(target);
-                }
+                if (gameState.currentPlayer === 'red') capturedPieces.red.push(target);
+                else capturedPieces.black.push(target);
                 board[to] = { ...attacker, position: to };
                 board[from] = null;
-            } else {
-                return;
-            }
+            } else return;
         } else {
             if (isValidMove(from, to)) {
                 board[to] = { ...attacker, position: to };
                 board[from] = null;
-            } else {
-                return;
-            }
+            } else return;
         }
-
         const winner = checkWinner(board);
         const nextPlayer = gameState.currentPlayer === 'red' ? 'black' : 'red';
-
         update(ref(db, `games/${currentGameId}`), {
             board,
             currentPlayer: winner ? null : nextPlayer,
@@ -452,27 +391,47 @@ export const useFirebase = (initialUserId: string | null) => {
             lastMove: { from, to, type: target ? 'capture' : 'move' },
             capturedPieces
         });
-
-        if (winner) {
-            updateStats(winner, 'normal');
-        }
+        if (winner) updateStats(winner, 'normal');
     };
 
     const handleFlip = (index: number) => {
-        if (isAdmin || !gameState || !currentGameId) return;
+        if (isAdmin || !gameState || !currentGameId || !user) return;
+        const playerColor = gameState.players.red?.id === user.id ? 'red' :
+            gameState.players.black?.id === user.id ? 'black' : null;
+
+        if (gameState.currentPlayer !== playerColor) return;
+
         const board = [...gameState.board];
         const piece = board[index];
         if (!piece || piece.isFlipped) return;
-
         board[index] = { ...piece, isFlipped: true };
-        let nextPlayer = gameState.currentPlayer === 'red' ? 'black' : 'red';
+        const nextPlayer = gameState.currentPlayer === 'red' ? 'black' : 'red';
 
-        update(ref(db, `games/${currentGameId}`), {
+        const finalUpdates: any = {
             board,
             currentPlayer: nextPlayer,
             turnStartTime: Date.now(),
             lastMove: { from: index, to: index, type: 'flip' }
-        });
+        };
+
+        if (!gameState.isColorAssigned) {
+            finalUpdates.isColorAssigned = true;
+            // First flip defines the roles. 
+            // If the flipped piece color doesn't match the flipper's current role, swap roles.
+            if (piece.color !== gameState.currentPlayer) {
+                const redP = gameState.players.red;
+                const blackP = gameState.players.black;
+                finalUpdates.players = {
+                    red: blackP,
+                    black: redP
+                };
+                // If we swap roles, Player A (who was Red) is now Black.
+                // It should now be Red's turn (the other person).
+                // Since nextPlayer was set to Black, we need to override it back to Red.
+                finalUpdates.currentPlayer = gameState.currentPlayer;
+            }
+        }
+        update(ref(db, `games/${currentGameId}`), finalUpdates);
     };
 
     const updateStats = (winnerColor: string, reason: 'normal' | 'surrender' | 'runaway' = 'normal') => {
@@ -480,10 +439,7 @@ export const useFirebase = (initialUserId: string | null) => {
         const players = gameState.players;
         const winnerId = winnerColor === 'red' ? players.red?.id : players.black?.id;
         const loserId = winnerColor === 'red' ? players.black?.id : players.red?.id;
-
-        if (winnerId && winnerId !== ADMIN_ID) {
-            update(ref(db, `users/${winnerId}`), { wins: increment(1) });
-        }
+        if (winnerId && winnerId !== ADMIN_ID) update(ref(db, `users/${winnerId}`), { wins: increment(1) });
         if (loserId && loserId !== ADMIN_ID) {
             const updates: any = { losses: increment(1) };
             if (reason === 'surrender') updates.surrenders = increment(1);
@@ -507,10 +463,8 @@ export const useFirebase = (initialUserId: string | null) => {
         if (isAdmin || !gameState || !currentGameId || !user) return;
         const color = gameState.players.red?.id === user.id ? 'red' : 'black';
         const otherColor = color === 'red' ? 'black' : 'red';
-
         const rematchRef = ref(db, `games/${currentGameId}/rematch/${color}`);
         set(rematchRef, true);
-
         if (gameState.rematch?.[otherColor]) {
             const initialBoard = initializeBoard();
             update(ref(db, `games/${currentGameId}`), {
@@ -522,7 +476,8 @@ export const useFirebase = (initialUserId: string | null) => {
                 lastMove: null,
                 capturedPieces: { red: [], black: [] },
                 turnStartTime: Date.now(),
-                rematch: { red: false, black: false }
+                rematch: { red: false, black: false },
+                isColorAssigned: false
             });
         }
     };
@@ -535,7 +490,6 @@ export const useFirebase = (initialUserId: string | null) => {
         toggleChatRoom(true);
     };
 
-    // Admin Utilities
     const clearChat = async () => {
         if (!isAdmin) return;
         await remove(ref(db, 'chat'));
@@ -549,62 +503,21 @@ export const useFirebase = (initialUserId: string | null) => {
         const usersRef = ref(db, 'users');
         onValue(usersRef, (snapshot) => {
             const data = snapshot.val();
-            if (data) {
-                Object.keys(data).forEach(userId => {
-                    update(ref(db, `users/${userId}`), { activeGameId: null });
-                });
-            }
+            if (data) Object.keys(data).forEach(userId => update(ref(db, `users/${userId}`), { activeGameId: null }));
         }, { onlyOnce: true });
         setGameState(null);
         setCurrentGameId(null);
     };
 
-    const clearUsers = async () => {
-        if (!isAdmin) return;
-        await remove(ref(db, 'users'));
-    };
-
+    const clearUsers = async () => { if (!isAdmin) await remove(ref(db, 'users')); };
     const clearStats = async () => {
         if (!isAdmin) return;
         const usersRef = ref(db, 'users');
         onValue(usersRef, (snapshot) => {
             const data = snapshot.val();
-            if (data) {
-                Object.keys(data).forEach(userId => {
-                    update(ref(db, `users/${userId}`), {
-                        wins: 0,
-                        losses: 0,
-                        surrenders: 0,
-                        runaways: 0,
-                        rejections: 0
-                    });
-                });
-            }
+            if (data) Object.keys(data).forEach(userId => update(ref(db, `users/${userId}`), { wins: 0, losses: 0, surrenders: 0, runaways: 0, rejections: 0 }));
         }, { onlyOnce: true });
     };
 
-    return {
-        user,
-        leaderboard,
-        onlinePlayers,
-        messages,
-        receivedChallenge,
-        gameState,
-        isAdmin,
-        toggleChatRoom,
-        sendMessage,
-        sendChallenge,
-        acceptChallenge,
-        rejectChallenge,
-        handleMove,
-        handleFlip,
-        surrender,
-        requestRematch,
-        exitGame,
-        joinSpectate,
-        clearChat,
-        clearGames,
-        clearUsers,
-        clearStats
-    };
+    return { user, leaderboard, onlinePlayers, messages, receivedChallenge, gameState, isAdmin, toggleChatRoom, sendMessage, sendChallenge, acceptChallenge, rejectChallenge, handleMove, handleFlip, surrender, requestRematch, exitGame, joinSpectate, clearChat, clearGames, clearUsers, clearStats };
 };
