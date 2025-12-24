@@ -6,12 +6,64 @@ interface HomeProps {
     user: UserProfile;
     leaderboard: UserProfile[];
     onJoinChat: () => void;
+    isAdmin?: boolean;
+    onClearChat?: () => void;
+    onClearGames?: () => void;
+    onClearUsers?: () => void;
 }
 
-export const Home: React.FC<HomeProps> = ({ user, leaderboard, onJoinChat }) => {
+const AdminPanel: React.FC<{
+    onClearChat: () => void;
+    onClearGames: () => void;
+    onClearUsers: () => void;
+}> = ({ onClearChat, onClearGames, onClearUsers }) => (
+    <div className="bg-red-900/20 border-2 border-red-500/50 rounded-2xl p-6 space-y-4">
+        <h3 className="text-xl font-black text-red-500 flex items-center gap-2 italic uppercase">
+            <span className="w-2 h-2 bg-red-500 rounded-full animate-ping" />
+            Admin Operations Panel
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <button
+                onClick={() => window.confirm('確定要清除所有聊天記錄？') && onClearChat()}
+                className="p-4 bg-gray-800 hover:bg-gray-700 border border-red-500/30 rounded-xl font-bold transition-all text-sm text-red-400"
+            >
+                🔥 清除所有聊天
+            </button>
+            <button
+                onClick={() => window.confirm('確定要清除所有戰局與挑戰？') && onClearGames()}
+                className="p-4 bg-gray-800 hover:bg-gray-700 border border-red-500/30 rounded-xl font-bold transition-all text-sm text-red-400"
+            >
+                ⚔️ 清除所有戰局
+            </button>
+            <button
+                onClick={() => window.confirm('注意：這將清除所有使用者數據！') && onClearUsers()}
+                className="p-4 bg-gray-800 hover:bg-gray-700 border border-red-500/30 rounded-xl font-bold transition-all text-sm text-red-400"
+            >
+                💀 清除所有使用者
+            </button>
+        </div>
+    </div>
+);
+
+export const Home: React.FC<HomeProps> = ({
+    user,
+    leaderboard,
+    onJoinChat,
+    isAdmin,
+    onClearChat,
+    onClearGames,
+    onClearUsers
+}) => {
     return (
         <div className="min-h-screen bg-gray-900 text-white p-4 md:p-8">
             <div className="max-w-6xl mx-auto space-y-8">
+                {isAdmin && onClearChat && onClearGames && onClearUsers && (
+                    <AdminPanel
+                        onClearChat={onClearChat}
+                        onClearGames={onClearGames}
+                        onClearUsers={onClearUsers}
+                    />
+                )}
                 {/* Header */}
                 <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-gray-800 p-6 rounded-2xl border border-gray-700">
                     <div className="flex items-center gap-4">
@@ -23,6 +75,7 @@ export const Home: React.FC<HomeProps> = ({ user, leaderboard, onJoinChat }) => 
                             <div className="flex gap-4 text-sm text-gray-400">
                                 <span>勝: <span className="text-green-400 font-bold">{user.wins}</span></span>
                                 <span>敗: <span className="text-red-400 font-bold">{user.losses}</span></span>
+                                <span>拒絕: <span className="text-gray-400 font-bold">{user.rejections || 0}</span></span>
                                 <span>勝率: <span className="text-blue-400 font-bold">
                                     {user.wins + user.losses > 0
                                         ? Math.round((user.wins / (user.wins + user.losses)) * 100)

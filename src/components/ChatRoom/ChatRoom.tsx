@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import type { UserProfile, ChatMessage, Challenge } from '../../types';
-import { Send, User, Swords, Shield, X, Eye } from 'lucide-react';
+import { Send, User, Swords, Shield, X, Eye, Trophy } from 'lucide-react';
 
 interface ChatRoomProps {
     currentUser: UserProfile;
@@ -13,6 +13,7 @@ interface ChatRoomProps {
     receivedChallenge?: Challenge;
     onAcceptChallenge: (challenge: Challenge) => void;
     onRejectChallenge: () => void;
+    leaderboard: UserProfile[];
 }
 
 export const ChatRoom: React.FC<ChatRoomProps> = ({
@@ -26,6 +27,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     receivedChallenge,
     onAcceptChallenge,
     onRejectChallenge,
+    leaderboard,
 }) => {
     const [inputText, setInputText] = useState('');
     const [selectedPlayer, setSelectedPlayer] = useState<UserProfile | null>(null);
@@ -45,9 +47,9 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
     };
 
     return (
-        <div className="flex flex-col md:flex-row h-screen bg-gray-900 text-white overflow-hidden">
-            {/* Sidebar / Topbar - Players */}
-            <div className="w-full md:w-80 bg-gray-800 border-b md:border-b-0 md:border-r border-gray-700 flex flex-col shrink-0">
+        <div className="flex flex-col lg:flex-row h-screen bg-gray-900 text-white overflow-hidden">
+            {/* Left Sidebar - Players */}
+            <div className="w-full lg:w-72 bg-gray-800 border-b lg:border-b-0 lg:border-r border-gray-700 flex flex-col shrink-0">
                 {/* Current User Info - Hidden or condensed on mobile to save space */}
                 <div className="hidden md:block p-4 bg-gradient-to-r from-red-900/30 to-gray-800 border-b border-gray-700">
                     <div className="flex items-center gap-3">
@@ -175,23 +177,34 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
                 </div>
 
                 <div ref={scrollRef} className="flex-1 p-4 space-y-4 overflow-y-auto overflow-x-hidden scroll-smooth">
-                    {messages.map((msg) => (
-                        <div key={msg.id} className={`flex flex-col ${msg.from === currentUser.id ? 'items-end' : 'items-start'}`}>
-                            <div className="flex items-center gap-2 mb-1">
-                                <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">{msg.fromName}</span>
-                                {msg.to && <span className="text-[10px] bg-blue-900/50 text-blue-300 px-1.5 py-0.5 rounded border border-blue-700/50">私訊</span>}
-                            </div>
-                            <div className={`
+                    {messages
+                        .filter(msg => {
+                            if (!selectedPlayer) {
+                                // World Chat: Only show public messages (no "to" field)
+                                return !msg.to;
+                            } else {
+                                // Private Chat: Only show messages between me and the selected player
+                                return (msg.from === currentUser.id && msg.to === selectedPlayer.id) ||
+                                    (msg.from === selectedPlayer.id && msg.to === currentUser.id);
+                            }
+                        })
+                        .map((msg) => (
+                            <div key={msg.id} className={`flex flex-col ${msg.from === currentUser.id ? 'items-end' : 'items-start'}`}>
+                                <div className="flex items-center gap-2 mb-1">
+                                    <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">{msg.fromName}</span>
+                                    {msg.to && <span className="text-[10px] bg-blue-900/50 text-blue-300 px-1.5 py-0.5 rounded border border-blue-700/50">私訊</span>}
+                                </div>
+                                <div className={`
                 max-w-[85%] px-4 py-2.5 rounded-2xl text-sm shadow-xl
                 ${msg.from === currentUser.id
-                                    ? 'bg-red-600 text-white rounded-tr-none shadow-red-900/10'
-                                    : 'bg-gray-800 text-gray-100 rounded-tl-none border border-gray-700 shadow-black/50'}
+                                        ? 'bg-red-600 text-white rounded-tr-none shadow-red-900/10'
+                                        : 'bg-gray-800 text-gray-100 rounded-tl-none border border-gray-700 shadow-black/50'}
               `}>
-                                {msg.content}
+                                    {msg.content}
+                                </div>
+                                <span className="text-[10px] text-gray-600 mt-1">{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                             </div>
-                            <span className="text-[10px] text-gray-600 mt-1">{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                        </div>
-                    ))}
+                        ))}
                 </div>
 
                 <form onSubmit={handleSend} className="p-4 bg-gray-800/50 border-t border-gray-700 sticky bottom-0 backdrop-blur-md">
@@ -234,18 +247,80 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
                                     onClick={() => onRejectChallenge()}
                                     className="flex-1 py-4 bg-gray-700 hover:bg-gray-600 rounded-2xl font-bold transition-all transform active:scale-95 border border-gray-600"
                                 >
-                                    逃跑 (拒絕)
+                                    拒絕
                                 </button>
                                 <button
                                     onClick={() => onAcceptChallenge(receivedChallenge)}
                                     className="flex-1 py-4 bg-red-600 hover:bg-red-700 rounded-2xl font-bold transition-all transform active:scale-95 shadow-lg shadow-red-900/40 border border-red-500"
                                 >
-                                    迎戰 (接受)
+                                    接受
                                 </button>
                             </div>
                         </div>
                     </div>
                 )}
+            </div>
+
+            {/* Right Sidebar - Leaderboard */}
+            <div className="hidden lg:flex w-64 xl:w-72 bg-gray-800 border-l border-gray-700 flex-col shrink-0">
+                <div className="p-4 border-b border-gray-700 bg-gradient-to-r from-gray-800 to-yellow-900/20">
+                    <h3 className="font-bold flex items-center gap-2 text-yellow-500">
+                        <Trophy size={20} className="text-yellow-500" />
+                        榮譽排行榜
+                    </h3>
+                    <p className="text-[10px] text-gray-400 mt-1 uppercase tracking-widest">Global Top 10 Players</p>
+                </div>
+
+                <div className="flex-1 overflow-y-auto">
+                    {leaderboard.map((player, index) => (
+                        <div
+                            key={player.id}
+                            className="p-4 border-b border-gray-700/50 flex items-center gap-3 hover:bg-gray-700/30 transition-colors"
+                        >
+                            <div className={`
+                                w-8 h-8 rounded-lg flex items-center justify-center font-black text-xs
+                                ${index === 0 ? 'bg-yellow-500 text-yellow-950 shadow-[0_0_15px_rgba(234,179,8,0.3)]' :
+                                    index === 1 ? 'bg-gray-300 text-gray-900' :
+                                        index === 2 ? 'bg-orange-600 text-orange-100' :
+                                            'bg-gray-700 text-gray-400'}
+                            `}>
+                                {index + 1}
+                            </div>
+
+                            <div className="flex-1 min-w-0">
+                                <div className="font-bold text-sm truncate">{player.name}</div>
+                                <div className="flex items-center gap-2 mt-0.5">
+                                    <span className="text-[10px] text-green-500 font-bold">{player.wins} 勝</span>
+                                    <span className="text-[10px] text-gray-500">{player.losses} 敗</span>
+                                </div>
+                            </div>
+
+                            {index < 3 && (
+                                <div className={`text-${index === 0 ? 'yellow' : index === 1 ? 'gray-400' : 'orange-500'}-500 opacity-50`}>
+                                    <Shield size={16} />
+                                </div>
+                            )}
+                        </div>
+                    ))}
+                    {leaderboard.length === 0 && (
+                        <div className="flex flex-col items-center justify-center p-8 text-gray-600 space-y-2">
+                            <Shield size={40} strokeWidth={1} />
+                            <span className="text-xs">尚無排名資料</span>
+                        </div>
+                    )}
+                </div>
+
+                <div className="p-4 bg-gray-900/50 border-t border-gray-700">
+                    <div className="bg-gray-800 rounded-xl p-3 border border-gray-700/50">
+                        <div className="text-[10px] text-gray-500 uppercase font-black mb-2">你的排名</div>
+                        <div className="flex items-center justify-between">
+                            <span className="text-sm font-bold truncate pr-2">{currentUser.name}</span>
+                            <span className="text-sm font-black text-yellow-500">
+                                #{leaderboard.findIndex(p => p.id === currentUser.id) + 1 || '?'}
+                            </span>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     );

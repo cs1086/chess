@@ -14,6 +14,7 @@ const App: React.FC = () => {
     messages,
     receivedChallenge,
     gameState,
+    isAdmin,
     toggleChatRoom,
     sendMessage,
     sendChallenge,
@@ -24,7 +25,10 @@ const App: React.FC = () => {
     surrender,
     requestRematch,
     exitGame,
-    joinSpectate
+    joinSpectate,
+    clearChat,
+    clearGames,
+    clearUsers
   } = useFirebase(storedUserId);
 
   useEffect(() => {
@@ -69,6 +73,7 @@ const App: React.FC = () => {
         receivedChallenge={receivedChallenge || undefined}
         onAcceptChallenge={acceptChallenge}
         onRejectChallenge={rejectChallenge}
+        leaderboard={leaderboard}
       />
     );
   }
@@ -78,6 +83,10 @@ const App: React.FC = () => {
       user={user}
       leaderboard={leaderboard}
       onJoinChat={() => toggleChatRoom(true)}
+      isAdmin={isAdmin}
+      onClearChat={clearChat}
+      onClearGames={clearGames}
+      onClearUsers={clearUsers}
     />
   );
 };

@@ -33,6 +33,7 @@ export interface GameState {
     black?: boolean;
   };
   spectators?: UserProfile[];
+  endReason?: 'normal' | 'surrender' | 'runaway';
 }
 
 export interface PlayerInfo {
@@ -47,6 +48,7 @@ export interface UserProfile {
   losses: number;
   surrenders: number;
   runaways: number;
+  rejections: number;
   lastOnline: number;
   inChatRoom: boolean;
   isOnline: boolean;

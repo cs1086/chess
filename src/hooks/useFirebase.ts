@@ -4,6 +4,8 @@ import { db } from '../firebase/config';
 import type { UserProfile, ChatMessage, Challenge, GameState } from '../types';
 import { initializeBoard, canCapture, isValidMove, checkWinner } from '../utils/gameLogic';
 
+const ADMIN_ID = 'mouse530';
+
 export const useFirebase = (initialUserId: string | null) => {
     const [user, setUser] = useState<UserProfile | null>(null);
     const [onlinePlayers, setOnlinePlayers] = useState<UserProfile[]>([]);
@@ -12,6 +14,8 @@ export const useFirebase = (initialUserId: string | null) => {
     const [gameState, setGameState] = useState<GameState | null>(null);
     const [leaderboard, setLeaderboard] = useState<UserProfile[]>([]);
     const [currentGameId, setCurrentGameId] = useState<string | null>(null);
+
+    const isAdmin = initialUserId === ADMIN_ID;
 
     // User Profile & Online Status
     useEffect(() => {
@@ -29,6 +33,7 @@ export const useFirebase = (initialUserId: string | null) => {
                     losses: 0,
                     surrenders: 0,
                     runaways: 0,
+                    rejections: 0,
                     lastOnline: Date.now(),
                     inChatRoom: false,
                     isOnline: true
@@ -37,10 +42,15 @@ export const useFirebase = (initialUserId: string | null) => {
             } else {
                 // Ensure id is always set, even if missing from database
                 const userData = snapshot.val() as UserProfile;
-                setUser({ ...userData, id: initialUserId, name: userData.name || initialUserId });
+                setUser({
+                    ...userData,
+                    id: initialUserId,
+                    name: userData.name || initialUserId,
+                    rejections: userData.rejections || 0
+                });
 
-                // Restore active game if exists
-                if (userData.activeGameId && !currentGameId) {
+                // Restore active game if exists (Admin doesn't play)
+                if (!isAdmin && userData.activeGameId && !currentGameId) {
                     setCurrentGameId(userData.activeGameId);
                 }
             }
@@ -48,11 +58,17 @@ export const useFirebase = (initialUserId: string | null) => {
 
         // Handle online status
         const statusRef = ref(db, `users/${initialUserId}`);
+
+        // Reset inChatRoom on refresh/mount
+        update(statusRef, {
+            isOnline: true,
+            inChatRoom: false
+        });
+
         onDisconnect(statusRef).update({
             isOnline: false,
             lastOnline: Date.now()
         });
-        update(statusRef, { isOnline: true });
 
         // Leaderboard and online players
         const allUsersRef = ref(db, 'users');
@@ -64,13 +80,18 @@ export const useFirebase = (initialUserId: string | null) => {
                     return {
                         ...val,
                         id: key,
-                        name: val.name || key, // Ensure name is always set
+                        name: val.name || key,
                         wins: val.wins || 0,
-                        losses: val.losses || 0
+                        losses: val.losses || 0,
+                        rejections: val.rejections || 0
                     };
                 });
-                setLeaderboard(users.sort((a, b) => b.wins - a.wins).slice(0, 10));
-                setOnlinePlayers(users.filter(u => u.isOnline === true && u.inChatRoom === true));
+
+                // Admin logic: 
+                // 1. Admin not in leaderboard
+                // 2. Admin not in online players (others can't see admin)
+                setLeaderboard(users.filter(u => u.id !== ADMIN_ID).sort((a, b) => b.wins - a.wins).slice(0, 10));
+                setOnlinePlayers(users.filter(u => u.isOnline === true && u.inChatRoom === true && u.id !== ADMIN_ID));
             }
         });
 
@@ -97,6 +118,9 @@ export const useFirebase = (initialUserId: string | null) => {
                 setMessages(msgs.slice(-50)); // Last 50 messages
             }
         });
+
+        // Admin doesn't receive challenges
+        if (isAdmin) return;
 
         const challengesRef = ref(db, `challenges/${user.id}`);
         const unsubscribeChallenges = onValue(challengesRef, (snapshot) => {
@@ -150,9 +174,24 @@ export const useFirebase = (initialUserId: string | null) => {
         return () => unsubscribeGame();
     }, [currentGameId]);
 
+    // Handle "Runaway" (Timeout) detection and auto-exit
+    useEffect(() => {
+        if (gameState?.gameStatus === 'ended' && gameState?.endReason === 'runaway') {
+            const isWinner = (gameState.players.red?.id === user?.id && gameState.winner === 'red') ||
+                (gameState.players.black?.id === user?.id && gameState.winner === 'black');
+
+            const message = isWinner
+                ? '對手因斷線超過 2 分鐘，判定您獲勝！系統將自動帶您回聊天室。'
+                : '您因斷線超時被判定逃跑，遊戲已結束。系統將自動帶您回首頁。';
+
+            alert(message);
+            exitGame();
+        }
+    }, [gameState?.gameStatus, gameState?.endReason]);
+
     // Runaway Monitoring (2 minutes timeout)
     useEffect(() => {
-        if (!gameState || gameState.gameStatus !== 'playing' || !user || !currentGameId) return;
+        if (isAdmin || !gameState || gameState.gameStatus !== 'playing' || !user || !currentGameId) return;
 
         const opponentId = gameState.players.red?.id === user.id
             ? gameState.players.black?.id
@@ -211,7 +250,7 @@ export const useFirebase = (initialUserId: string | null) => {
     };
 
     const sendChallenge = (toId: string) => {
-        if (!user) return;
+        if (!user || isAdmin) return;
         const challenge: Challenge = {
             id: user.id,
             fromId: user.id,
@@ -224,6 +263,7 @@ export const useFirebase = (initialUserId: string | null) => {
     };
 
     const acceptChallenge = (challenge: Challenge) => {
+        if (isAdmin) return;
         const gameId = `${challenge.fromId}_${challenge.toId}_${Date.now()}`;
         const initialBoard = initializeBoard();
 
@@ -250,7 +290,7 @@ export const useFirebase = (initialUserId: string | null) => {
     };
 
     const joinSpectate = (gameId: string) => {
-        if (!user || !user.id) return;
+        if (!user || !user.id || isAdmin) return;
         const spectatorRef = ref(db, `games/${gameId}/spectators/${user.id}`);
         set(spectatorRef, {
             id: user.id,
@@ -264,11 +304,16 @@ export const useFirebase = (initialUserId: string | null) => {
     };
 
     const rejectChallenge = () => {
-        remove(ref(db, `challenges/${user!.id}`));
+        if (isAdmin || !user) return;
+        // Increment rejection count
+        update(ref(db, `users/${user.id}`), {
+            rejections: increment(1)
+        });
+        remove(ref(db, `challenges/${user.id}`));
     };
 
     const handleMove = (from: number, to: number) => {
-        if (!gameState || !currentGameId) return;
+        if (isAdmin || !gameState || !currentGameId) return;
         const currentCaptured = gameState.capturedPieces || { red: [], black: [] };
         const capturedPieces = {
             red: Array.isArray(currentCaptured.red) ? [...currentCaptured.red] : Object.values(currentCaptured.red || {}),
@@ -321,7 +366,7 @@ export const useFirebase = (initialUserId: string | null) => {
     };
 
     const handleFlip = (index: number) => {
-        if (!gameState || !currentGameId) return;
+        if (isAdmin || !gameState || !currentGameId) return;
         const board = [...gameState.board];
         const piece = board[index];
         if (!piece || piece.isFlipped) return;
@@ -329,9 +374,6 @@ export const useFirebase = (initialUserId: string | null) => {
         board[index] = { ...piece, isFlipped: true };
 
         let nextPlayer = gameState.currentPlayer === 'red' ? 'black' : 'red';
-
-        // Assign colors on first flip if needed? No, darker chess usually randomizes or first flip decides.
-        // In this version, we randomize start player.
 
         update(ref(db, `games/${currentGameId}`), {
             board,
@@ -347,12 +389,12 @@ export const useFirebase = (initialUserId: string | null) => {
         const winnerId = winnerColor === 'red' ? players.red?.id : players.black?.id;
         const loserId = winnerColor === 'red' ? players.black?.id : players.red?.id;
 
-        if (winnerId) {
+        if (winnerId && winnerId !== ADMIN_ID) {
             update(ref(db, `users/${winnerId}`), {
                 wins: increment(1)
             });
         }
-        if (loserId) {
+        if (loserId && loserId !== ADMIN_ID) {
             const updates: any = { losses: increment(1) };
             if (reason === 'surrender') updates.surrenders = increment(1);
             if (reason === 'runaway') updates.runaways = increment(1);
@@ -361,7 +403,7 @@ export const useFirebase = (initialUserId: string | null) => {
     };
 
     const surrender = () => {
-        if (!gameState || !currentGameId) return;
+        if (isAdmin || !gameState || !currentGameId) return;
         const winner = gameState.players.red?.id === user?.id ? 'black' : 'red';
         update(ref(db, `games/${currentGameId}`), {
             gameStatus: 'ended',
@@ -372,7 +414,7 @@ export const useFirebase = (initialUserId: string | null) => {
     };
 
     const requestRematch = () => {
-        if (!gameState || !currentGameId || !user) return;
+        if (isAdmin || !gameState || !currentGameId || !user) return;
         const color = gameState.players.red?.id === user.id ? 'red' : 'black';
         const otherColor = color === 'red' ? 'black' : 'red';
 
@@ -387,6 +429,9 @@ export const useFirebase = (initialUserId: string | null) => {
                 currentPlayer: Math.random() > 0.5 ? 'red' : 'black',
                 gameStatus: 'playing',
                 winner: null,
+                endReason: null,
+                lastMove: null,
+                capturedPieces: { red: [], black: [] },
                 turnStartTime: Date.now(),
                 rematch: { red: false, black: false }
             });
@@ -396,14 +441,42 @@ export const useFirebase = (initialUserId: string | null) => {
     const exitGame = () => {
         if (!user || !user.id || !currentGameId) return;
 
-        // Remove from spectators just in case
         remove(ref(db, `games/${currentGameId}/spectators/${user.id}`));
-
-        // Clear activeGameId
         update(ref(db, `users/${user.id}`), { activeGameId: null });
 
         setCurrentGameId(null);
         toggleChatRoom(true);
+    };
+
+    // Admin Utilities
+    const clearChat = async () => {
+        if (!isAdmin) return;
+        await remove(ref(db, 'chat'));
+        setMessages([]);
+    };
+
+    const clearGames = async () => {
+        if (!isAdmin) return;
+        await remove(ref(db, 'games'));
+        await remove(ref(db, 'challenges'));
+        // Clear all users activeGameId
+        const usersRef = ref(db, 'users');
+        onValue(usersRef, (snapshot) => {
+            const data = snapshot.val();
+            if (data) {
+                Object.keys(data).forEach(userId => {
+                    update(ref(db, `users/${userId}`), { activeGameId: null });
+                });
+            }
+        }, { onlyOnce: true });
+        setGameState(null);
+        setCurrentGameId(null);
+    };
+
+    const clearUsers = async () => {
+        if (!isAdmin) return;
+        await remove(ref(db, 'users'));
+        // Special case: we don't want to log out the current admin
     };
 
     return {
@@ -413,6 +486,7 @@ export const useFirebase = (initialUserId: string | null) => {
         messages,
         receivedChallenge,
         gameState,
+        isAdmin,
         toggleChatRoom,
         sendMessage,
         sendChallenge,
@@ -423,6 +497,9 @@ export const useFirebase = (initialUserId: string | null) => {
         surrender,
         requestRematch,
         exitGame,
-        joinSpectate
+        joinSpectate,
+        clearChat,
+        clearGames,
+        clearUsers
     };
 };
