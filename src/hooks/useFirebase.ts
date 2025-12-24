@@ -351,12 +351,25 @@ export const useFirebase = (initialUserId: string | null) => {
         const gameId = `${challenge.fromId}_${challenge.toId}_${Date.now()}`;
         const initialBoard = initializeBoard();
 
+        const challenger = onlinePlayers.find(p => p.id === challenge.fromId);
+        const challenged = onlinePlayers.find(p => p.id === challenge.toId);
+
         const newGame: GameState = {
             board: initialBoard,
             currentPlayer: Math.random() > 0.5 ? 'red' : 'black',
             players: {
-                red: { id: challenge.fromId, name: challenge.fromName },
-                black: { id: challenge.toId, name: user!.name }
+                red: {
+                    id: challenge.fromId,
+                    name: challenge.fromName,
+                    wins: challenger?.wins || 0,
+                    losses: challenger?.losses || 0
+                },
+                black: {
+                    id: challenge.toId,
+                    name: user!.name,
+                    wins: challenged?.wins || 0,
+                    losses: challenged?.losses || 0
+                }
             },
             gameStatus: 'playing',
             turnStartTime: Date.now()

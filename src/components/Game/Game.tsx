@@ -90,7 +90,17 @@ export const Game: React.FC<GameProps> = ({
                 <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold mb-1 ${color === 'red' ? 'bg-red-600' : 'bg-gray-950 text-white'}`}>
                     {player?.name?.[0]?.toUpperCase() || '?'}
                 </div>
-                <span className="text-xs font-bold truncate max-w-[80px]">{player?.name || '等待中...'}</span>
+                <span className="text-xs font-bold truncate max-w-[100px] mb-0.5">{player?.name || '等待中...'}</span>
+                {player && (
+                    <div className="flex flex-col items-center gap-0.5 opacity-80 scale-90">
+                        <span className="text-[10px] text-gray-400 font-mono">
+                            {player.wins}勝 {player.losses}敗
+                        </span>
+                        <span className="text-[9px] text-blue-400 font-bold bg-blue-900/20 px-1 rounded">
+                            {player.wins + player.losses > 0 ? Math.round((player.wins / (player.wins + player.losses)) * 100) : 0}% 勝率
+                        </span>
+                    </div>
+                )}
                 {isTimerEnabled && isCurrent && gameState.gameStatus === 'playing' && (
                     <div className="flex items-center gap-1 text-[10px] text-orange-400 mt-1 font-mono">
                         <Timer size={10} />

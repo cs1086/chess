@@ -39,6 +39,8 @@ export interface GameState {
 export interface PlayerInfo {
   id: string;
   name: string;
+  wins: number;
+  losses: number;
 }
 
 export interface UserProfile {
