@@ -28,7 +28,8 @@ const App: React.FC = () => {
     joinSpectate,
     clearChat,
     clearGames,
-    clearUsers
+    clearUsers,
+    clearStats
   } = useFirebase(storedUserId);
 
   useEffect(() => {
@@ -87,6 +88,7 @@ const App: React.FC = () => {
       onClearChat={clearChat}
       onClearGames={clearGames}
       onClearUsers={clearUsers}
+      onClearStats={clearStats}
     />
   );
 };

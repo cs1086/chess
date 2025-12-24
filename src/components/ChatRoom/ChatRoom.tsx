@@ -92,14 +92,21 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
                                     <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 border-2 border-gray-800 rounded-full"></div>
                                 </div>
                                 <div className="flex flex-col overflow-hidden max-w-[80px] md:max-w-none">
-                                    <div className="flex items-center gap-1">
-                                        <span className="font-medium text-xs md:text-sm truncate">{player.name || player.id}{player.id === currentUser.id ? '(你)' : ''}</span>
+                                    <div className="flex items-center gap-1 overflow-hidden">
+                                        <span className="font-medium text-xs md:text-sm truncate shrink-0">{player.name || player.id}{player.id === currentUser.id ? '(你)' : ''}</span>
                                         {player.activeGameId && (
-                                            <span className="text-[9px] bg-red-900/40 text-red-400 px-1 rounded border border-red-500/20 shrink-0">對戰中</span>
+                                            <span className="text-[9px] bg-red-900/40 text-red-400 px-1 rounded border border-red-500/20 truncate">
+                                                對戰 {
+                                                    onlinePlayers.find(p => p.id !== player.id && p.activeGameId === player.activeGameId)?.name || '未知'
+                                                }
+                                            </span>
                                         )}
                                     </div>
                                     <span className="hidden md:block text-[10px] text-gray-500 truncate">ID: {player.id}</span>
-                                    <span className="text-[10px] text-gray-500">勝率: {player.wins + player.losses > 0 ? Math.round((player.wins / (player.wins + player.losses)) * 100) : 0}%</span>
+                                    <span className="text-[10px] text-gray-400">
+                                        勝率: {player.wins + player.losses > 0 ? Math.round((player.wins / (player.wins + player.losses)) * 100) : 0}%
+                                        {player.inChatRoom ? ' 在線' : ' 在房間'}
+                                    </span>
                                 </div>
                             </div>
 
@@ -266,9 +273,8 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
                 <div className="p-4 border-b border-gray-700 bg-gradient-to-r from-gray-800 to-yellow-900/20">
                     <h3 className="font-bold flex items-center gap-2 text-yellow-500">
                         <Trophy size={20} className="text-yellow-500" />
-                        榮譽排行榜
+                        KO榜
                     </h3>
-                    <p className="text-[10px] text-gray-400 mt-1 uppercase tracking-widest">Global Top 10 Players</p>
                 </div>
 
                 <div className="flex-1 overflow-y-auto">

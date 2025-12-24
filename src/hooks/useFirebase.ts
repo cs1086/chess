@@ -91,7 +91,7 @@ export const useFirebase = (initialUserId: string | null) => {
                 // 1. Admin not in leaderboard
                 // 2. Admin not in online players (others can't see admin)
                 setLeaderboard(users.filter(u => u.id !== ADMIN_ID).sort((a, b) => b.wins - a.wins).slice(0, 10));
-                setOnlinePlayers(users.filter(u => u.isOnline === true && u.inChatRoom === true && u.id !== ADMIN_ID));
+                setOnlinePlayers(users.filter(u => u.isOnline === true && u.id !== ADMIN_ID));
             }
         });
 
@@ -187,7 +187,36 @@ export const useFirebase = (initialUserId: string | null) => {
             alert(message);
             exitGame();
         }
-    }, [gameState?.gameStatus, gameState?.endReason]);
+    }, [gameState?.gameStatus, gameState?.endReason, user?.id]);
+
+    // Handle opponent leaving after game ends
+    useEffect(() => {
+        if (isAdmin || !gameState || gameState.gameStatus !== 'ended' || !user || !currentGameId) return;
+
+        // Skip if it was a runaway end, it's already handled above
+        if (gameState.endReason === 'runaway') return;
+
+        const opponentId = gameState.players.red?.id === user.id
+            ? gameState.players.black?.id
+            : gameState.players.red?.id;
+
+        if (!opponentId) return;
+
+        const opponentRef = ref(db, `users/${opponentId}`);
+        const unsubscribeOpponent = onValue(opponentRef, (snapshot) => {
+            const opponentData = snapshot.val() as UserProfile;
+            if (opponentData) {
+                // If opponent left the game room or went offline
+                const hasLeft = opponentData.activeGameId !== currentGameId || !opponentData.isOnline;
+                if (hasLeft) {
+                    alert('對手已離開或不願意續戰，系統將自動帶您回聊天室。');
+                    exitGame();
+                }
+            }
+        });
+
+        return () => unsubscribeOpponent();
+    }, [gameState?.gameStatus, currentGameId, user?.id, isAdmin]);
 
     // Runaway Monitoring (2 minutes timeout)
     useEffect(() => {
@@ -222,7 +251,7 @@ export const useFirebase = (initialUserId: string | null) => {
 
         const interval = setInterval(checkRunaway, 10000); // Check every 10 seconds
         return () => clearInterval(interval);
-    }, [gameState?.gameStatus, currentGameId, user?.id]);
+    }, [gameState?.gameStatus, currentGameId, user?.id, isAdmin]);
 
     const toggleChatRoom = (inRoom: boolean) => {
         if (!user || !user.id) return;
@@ -479,6 +508,25 @@ export const useFirebase = (initialUserId: string | null) => {
         // Special case: we don't want to log out the current admin
     };
 
+    const clearStats = async () => {
+        if (!isAdmin) return;
+        const usersRef = ref(db, 'users');
+        onValue(usersRef, (snapshot) => {
+            const data = snapshot.val();
+            if (data) {
+                Object.keys(data).forEach(userId => {
+                    update(ref(db, `users/${userId}`), {
+                        wins: 0,
+                        losses: 0,
+                        surrenders: 0,
+                        runaways: 0,
+                        rejections: 0
+                    });
+                });
+            }
+        }, { onlyOnce: true });
+    };
+
     return {
         user,
         leaderboard,
@@ -500,6 +548,7 @@ export const useFirebase = (initialUserId: string | null) => {
         joinSpectate,
         clearChat,
         clearGames,
-        clearUsers
+        clearUsers,
+        clearStats
     };
 };

@@ -10,13 +10,15 @@ interface HomeProps {
     onClearChat?: () => void;
     onClearGames?: () => void;
     onClearUsers?: () => void;
+    onClearStats?: () => void;
 }
 
 const AdminPanel: React.FC<{
     onClearChat: () => void;
     onClearGames: () => void;
     onClearUsers: () => void;
-}> = ({ onClearChat, onClearGames, onClearUsers }) => (
+    onClearStats: () => void;
+}> = ({ onClearChat, onClearGames, onClearUsers, onClearStats }) => (
     <div className="bg-red-900/20 border-2 border-red-500/50 rounded-2xl p-6 space-y-4">
         <h3 className="text-xl font-black text-red-500 flex items-center gap-2 italic uppercase">
             <span className="w-2 h-2 bg-red-500 rounded-full animate-ping" />
@@ -41,6 +43,12 @@ const AdminPanel: React.FC<{
             >
                 💀 清除所有使用者
             </button>
+            <button
+                onClick={() => window.confirm('確定要清除所有玩家的勝敗、逃跑與拒絕紀錄？') && onClearStats()}
+                className="p-4 bg-gray-800 hover:bg-gray-700 border border-yellow-500/30 rounded-xl font-bold transition-all text-sm text-yellow-400"
+            >
+                📊 清除所有紀錄 (不刪帳號)
+            </button>
         </div>
     </div>
 );
@@ -52,16 +60,18 @@ export const Home: React.FC<HomeProps> = ({
     isAdmin,
     onClearChat,
     onClearGames,
-    onClearUsers
+    onClearUsers,
+    onClearStats
 }) => {
     return (
         <div className="min-h-screen bg-gray-900 text-white p-4 md:p-8">
             <div className="max-w-6xl mx-auto space-y-8">
-                {isAdmin && onClearChat && onClearGames && onClearUsers && (
+                {isAdmin && onClearChat && onClearGames && onClearUsers && onClearStats && (
                     <AdminPanel
                         onClearChat={onClearChat}
                         onClearGames={onClearGames}
                         onClearUsers={onClearUsers}
+                        onClearStats={onClearStats}
                     />
                 )}
                 {/* Header */}
