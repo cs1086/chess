@@ -106,7 +106,7 @@ export const useFirebase = (initialUserId: string | null) => {
                 });
 
                 // Admin logic: 
-                setLeaderboard(users.filter(u => u.id !== ADMIN_ID).sort((a, b) => {
+                setLeaderboard(users.filter(u => u.id !== ADMIN_ID && (u.wins + u.losses > 0)).sort((a, b) => {
                     const winRateA = (a.wins + a.losses > 0) ? (a.wins / (a.wins + a.losses)) : 0;
                     const winRateB = (b.wins + b.losses > 0) ? (b.wins / (b.wins + b.losses)) : 0;
 
