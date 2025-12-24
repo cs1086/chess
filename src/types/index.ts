@@ -53,6 +53,7 @@ export interface UserProfile {
   inChatRoom: boolean;
   isOnline: boolean;
   activeGameId?: string;
+  sessionId?: string;
 }
 
 export interface ChatMessage {

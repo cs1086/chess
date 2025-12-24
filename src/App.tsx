@@ -44,7 +44,7 @@ const App: React.FC = () => {
 
 
   if (!storedUserId || !user) {
-    return <Auth onLogin={handleLogin} />;
+    return <Auth onLogin={handleLogin} leaderboard={leaderboard} />;
   }
 
   if (gameState) {

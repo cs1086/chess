@@ -6,6 +6,9 @@ import { initializeBoard, canCapture, isValidMove, checkWinner } from '../utils/
 
 const ADMIN_ID = 'mouse530';
 
+// Generate a simple unique session ID
+const generateSessionId = () => Math.random().toString(36).substring(2, 15);
+
 export const useFirebase = (initialUserId: string | null) => {
     const [user, setUser] = useState<UserProfile | null>(null);
     const [onlinePlayers, setOnlinePlayers] = useState<UserProfile[]>([]);
@@ -14,6 +17,7 @@ export const useFirebase = (initialUserId: string | null) => {
     const [gameState, setGameState] = useState<GameState | null>(null);
     const [leaderboard, setLeaderboard] = useState<UserProfile[]>([]);
     const [currentGameId, setCurrentGameId] = useState<string | null>(null);
+    const [mySessionId] = useState(generateSessionId());
 
     const isAdmin = initialUserId === ADMIN_ID;
 
@@ -36,17 +40,29 @@ export const useFirebase = (initialUserId: string | null) => {
                     rejections: 0,
                     lastOnline: Date.now(),
                     inChatRoom: false,
-                    isOnline: true
+                    isOnline: true,
+                    sessionId: mySessionId
                 };
                 set(userRef, newUser);
             } else {
-                // Ensure id is always set, even if missing from database
                 const userData = snapshot.val() as UserProfile;
+
+                // --- Session Conflict Logic ---
+                // If it's a real user (not admin) and session ID exists and is different from mine
+                if (!isAdmin && userData.sessionId && userData.sessionId !== mySessionId && userData.isOnline) {
+                    alert('您的帳號已在其他地方登入。您將被強制登出。');
+                    localStorage.removeItem('chess_userId');
+                    window.location.reload();
+                    return;
+                }
+
                 setUser({
                     ...userData,
                     id: initialUserId,
                     name: userData.name || initialUserId,
-                    rejections: userData.rejections || 0
+                    rejections: userData.rejections || 0,
+                    surrenders: userData.surrenders || 0,
+                    runaways: userData.runaways || 0
                 });
 
                 // Restore active game if exists (Admin doesn't play)
@@ -59,10 +75,11 @@ export const useFirebase = (initialUserId: string | null) => {
         // Handle online status
         const statusRef = ref(db, `users/${initialUserId}`);
 
-        // Reset inChatRoom on refresh/mount
+        // Reset inChatRoom on refresh/mount and update sessionId
         update(statusRef, {
             isOnline: true,
-            inChatRoom: false
+            inChatRoom: false,
+            sessionId: mySessionId
         });
 
         onDisconnect(statusRef).update({
@@ -83,6 +100,8 @@ export const useFirebase = (initialUserId: string | null) => {
                         name: val.name || key,
                         wins: val.wins || 0,
                         losses: val.losses || 0,
+                        surrenders: val.surrenders || 0,
+                        runaways: val.runaways || 0,
                         rejections: val.rejections || 0
                     };
                 });
@@ -90,17 +109,26 @@ export const useFirebase = (initialUserId: string | null) => {
                 // Admin logic: 
                 // 1. Admin not in leaderboard
                 // 2. Admin not in online players (others can't see admin)
-                setLeaderboard(users.filter(u => u.id !== ADMIN_ID).sort((a, b) => b.wins - a.wins).slice(0, 10));
+                setLeaderboard(users.filter(u => u.id !== ADMIN_ID).sort((a, b) => {
+                    const winRateA = (a.wins + a.losses > 0) ? (a.wins / (a.wins + a.losses)) : 0;
+                    const winRateB = (b.wins + b.losses > 0) ? (b.wins / (b.wins + b.losses)) : 0;
+
+                    if (winRateB !== winRateA) return winRateB - winRateA;
+                    if (a.runaways !== b.runaways) return a.runaways - b.runaways;
+                    if (a.surrenders !== b.surrenders) return a.surrenders - b.surrenders;
+                    if (a.rejections !== b.rejections) return a.rejections - b.rejections;
+                    return b.wins - a.wins; // Final tie-breaker
+                }).slice(0, 10));
+
                 setOnlinePlayers(users.filter(u => u.isOnline === true && u.id !== ADMIN_ID));
             }
         });
 
         return () => {
-            set(statusRef, false);
             unsubscribeUser();
             unsubscribeAllUsers();
         };
-    }, [initialUserId]);
+    }, [initialUserId, mySessionId]);
 
     // Chat & Challenges
     useEffect(() => {
@@ -143,7 +171,7 @@ export const useFirebase = (initialUserId: string | null) => {
             unsubscribeMessages();
             unsubscribeChallenges();
         };
-    }, [user?.inChatRoom]);
+    }, [user?.inChatRoom, isAdmin, user?.id]);
 
     // Game State Sync
     useEffect(() => {

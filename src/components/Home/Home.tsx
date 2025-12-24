@@ -82,10 +82,12 @@ export const Home: React.FC<HomeProps> = ({
                         </div>
                         <div>
                             <h2 className="text-2xl font-bold">{user.name}</h2>
-                            <div className="flex gap-4 text-sm text-gray-400">
+                            <div className="flex flex-wrap gap-4 text-sm text-gray-400">
                                 <span>勝: <span className="text-green-400 font-bold">{user.wins}</span></span>
                                 <span>敗: <span className="text-red-400 font-bold">{user.losses}</span></span>
-                                <span>拒絕: <span className="text-gray-400 font-bold">{user.rejections || 0}</span></span>
+                                <span>投降: <span className="text-orange-400 font-bold">{user.surrenders || 0}</span></span>
+                                <span>逃跑: <span className="text-purple-400 font-bold">{user.runaways || 0}</span></span>
+                                <span>拒絕: <span className="text-gray-300 font-bold">{user.rejections || 0}</span></span>
                                 <span>勝率: <span className="text-blue-400 font-bold">
                                     {user.wins + user.losses > 0
                                         ? Math.round((user.wins / (user.wins + user.losses)) * 100)
@@ -119,6 +121,9 @@ export const Home: React.FC<HomeProps> = ({
                                     <th className="px-6 py-4">玩家</th>
                                     <th className="px-6 py-4 text-center">勝</th>
                                     <th className="px-6 py-4 text-center">敗</th>
+                                    <th className="px-6 py-4 text-center">投</th>
+                                    <th className="px-6 py-4 text-center">逃</th>
+                                    <th className="px-6 py-4 text-center">拒</th>
                                     <th className="px-6 py-4 text-right">勝率</th>
                                 </tr>
                             </thead>
@@ -134,7 +139,10 @@ export const Home: React.FC<HomeProps> = ({
                                         </td>
                                         <td className="px-6 py-4 text-center text-green-400 font-mono">{player.wins}</td>
                                         <td className="px-6 py-4 text-center text-red-400 font-mono">{player.losses}</td>
-                                        <td className="px-6 py-4 text-right font-mono">
+                                        <td className="px-6 py-4 text-center text-orange-400 font-mono">{player.surrenders || 0}</td>
+                                        <td className="px-6 py-4 text-center text-purple-400 font-mono">{player.runaways || 0}</td>
+                                        <td className="px-6 py-4 text-center text-gray-400 font-mono">{player.rejections || 0}</td>
+                                        <td className="px-6 py-4 text-right font-mono text-blue-400">
                                             {player.wins + player.losses > 0
                                                 ? Math.round((player.wins / (player.wins + player.losses)) * 100)
                                                 : 0}%

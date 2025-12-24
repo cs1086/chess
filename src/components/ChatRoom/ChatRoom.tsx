@@ -295,9 +295,12 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
 
                             <div className="flex-1 min-w-0">
                                 <div className="font-bold text-sm truncate">{player.name}</div>
-                                <div className="flex items-center gap-2 mt-0.5">
-                                    <span className="text-[10px] text-green-500 font-bold">{player.wins} 勝</span>
-                                    <span className="text-[10px] text-gray-500">{player.losses} 敗</span>
+                                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
+                                    <span className="text-[10px] text-green-500 font-bold">{player.wins}勝</span>
+                                    <span className="text-[10px] text-red-500">{player.losses}敗</span>
+                                    <span className="text-[10px] text-orange-400">{player.surrenders || 0}投</span>
+                                    <span className="text-[10px] text-purple-400">{player.runaways || 0}逃</span>
+                                    <span className="text-[10px] text-gray-400">{player.rejections || 0}拒</span>
                                 </div>
                             </div>
 
