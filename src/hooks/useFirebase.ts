@@ -47,8 +47,7 @@ export const useFirebase = (initialUserId: string | null) => {
             } else {
                 const userData = snapshot.val() as UserProfile;
 
-                // --- Session Conflict Logic ---
-                // If it's a real user (not admin) and session ID exists and is different from mine
+                // Session Conflict Logic
                 if (!isAdmin && userData.sessionId && userData.sessionId !== mySessionId && userData.isOnline) {
                     alert('您的帳號已在其他地方登入。您將被強制登出。');
                     localStorage.removeItem('chess_userId');
@@ -128,7 +127,7 @@ export const useFirebase = (initialUserId: string | null) => {
             unsubscribeUser();
             unsubscribeAllUsers();
         };
-    }, [initialUserId, mySessionId]);
+    }, [initialUserId, mySessionId, isAdmin, currentGameId]);
 
     // Chat & Challenges
     useEffect(() => {
@@ -202,49 +201,74 @@ export const useFirebase = (initialUserId: string | null) => {
         return () => unsubscribeGame();
     }, [currentGameId]);
 
-    // Handle "Runaway" (Timeout) detection and auto-exit
+    // Handle "Runaway" or "Surrender" detection and auto-exit for everyone
     useEffect(() => {
-        if (gameState?.gameStatus === 'ended' && gameState?.endReason === 'runaway') {
-            const isWinner = (gameState.players.red?.id === user?.id && gameState.winner === 'red') ||
-                (gameState.players.black?.id === user?.id && gameState.winner === 'black');
+        if (!gameState || gameState.gameStatus !== 'ended' || !user || isAdmin) return;
 
-            const message = isWinner
-                ? '對手因斷線超過 2 分鐘，判定您獲勝！系統將自動帶您回聊天室。'
-                : '您因斷線超時被判定逃跑，遊戲已結束。系統將自動帶您回首頁。';
+        const isPlayer = gameState.players.red?.id === user.id || gameState.players.black?.id === user.id;
+        const reason = gameState.endReason;
 
-            alert(message);
+        if (reason === 'runaway') {
+            if (isPlayer) {
+                const isWinner = (gameState.players.red?.id === user.id && gameState.winner === 'red') ||
+                    (gameState.players.black?.id === user.id && gameState.winner === 'black');
+                alert(isWinner
+                    ? '對手因斷線超過 2 分鐘，判定您獲勝！系統將自動帶您回聊天室。'
+                    : '您因斷線超時被判定逃跑，遊戲已結束。系統將自動帶您回首頁。');
+            } else {
+                const runawayColor = gameState.winner === 'red' ? '黑色' : '紅色';
+                alert(`由於 ${runawayColor} 玩家斷線超時（逃跑），遊戲已結束。系統將帶您回聊天室。`);
+            }
+            exitGame();
+        } else if (reason === 'surrender' && !isPlayer) {
+            // Alert spectators if a player surrenders
+            const surrenderColor = gameState.winner === 'red' ? '黑色' : '紅色';
+            alert(`由於 ${surrenderColor} 玩家投降，遊戲已結束。系統將帶您回聊天室。`);
             exitGame();
         }
-    }, [gameState?.gameStatus, gameState?.endReason, user?.id]);
+    }, [gameState?.gameStatus, gameState?.endReason, user?.id, isAdmin, gameState?.players.red?.id, gameState?.players.black?.id, gameState?.winner]);
 
-    // Handle opponent leaving after game ends
+    // Handle players leaving after game ends
     useEffect(() => {
         if (isAdmin || !gameState || gameState.gameStatus !== 'ended' || !user || !currentGameId) return;
-
-        // Skip if it was a runaway end, it's already handled above
         if (gameState.endReason === 'runaway') return;
 
-        const opponentId = gameState.players.red?.id === user.id
-            ? gameState.players.black?.id
-            : gameState.players.red?.id;
+        const isPlayer = gameState.players.red?.id === user.id || gameState.players.black?.id === user.id;
 
-        if (!opponentId) return;
+        if (isPlayer) {
+            const opponentId = gameState.players.red?.id === user.id ? gameState.players.black?.id : gameState.players.red?.id;
+            if (!opponentId) return;
+            const opponentRef = ref(db, `users/${opponentId}`);
+            const unsubscribeOpponent = onValue(opponentRef, (snapshot) => {
+                const opponentData = snapshot.val() as UserProfile;
+                if (opponentData) {
+                    const hasLeft = opponentData.activeGameId !== currentGameId || !opponentData.isOnline;
+                    if (hasLeft) {
+                        alert('對手已離開或不願意續戰，系統將自動帶您回聊天室。');
+                        exitGame();
+                    }
+                }
+            });
+            return () => unsubscribeOpponent();
+        } else if (gameState.endReason !== 'surrender') {
+            // Spectators: Monitor both players (if not already handled by surrender/runaway alerts)
+            const redId = gameState.players.red?.id;
+            const blackId = gameState.players.black?.id;
+            if (!redId || !blackId) return;
 
-        const opponentRef = ref(db, `users/${opponentId}`);
-        const unsubscribeOpponent = onValue(opponentRef, (snapshot) => {
-            const opponentData = snapshot.val() as UserProfile;
-            if (opponentData) {
-                // If opponent left the game room or went offline
-                const hasLeft = opponentData.activeGameId !== currentGameId || !opponentData.isOnline;
-                if (hasLeft) {
-                    alert('對手已離開或不願意續戰，系統將自動帶您回聊天室。');
+            const checkPlayers = (snapshot: any) => {
+                const pData = snapshot.val() as UserProfile;
+                if (pData && (pData.activeGameId !== currentGameId || !pData.isOnline)) {
+                    alert('對戰雙方已離開，系統將自動帶您回聊天室。');
                     exitGame();
                 }
-            }
-        });
+            };
 
-        return () => unsubscribeOpponent();
-    }, [gameState?.gameStatus, currentGameId, user?.id, isAdmin]);
+            const unsubRed = onValue(ref(db, `users/${redId}`), checkPlayers);
+            const unsubBlack = onValue(ref(db, `users/${blackId}`), checkPlayers);
+            return () => { unsubRed(); unsubBlack(); };
+        }
+    }, [gameState?.gameStatus, currentGameId, user?.id, isAdmin, gameState?.endReason, gameState?.players.red?.id, gameState?.players.black?.id]);
 
     // Runaway Monitoring (2 minutes timeout)
     useEffect(() => {
@@ -263,9 +287,7 @@ export const useFirebase = (initialUserId: string | null) => {
                 if (opponentData && !opponentData.isOnline) {
                     const offlineDuration = Date.now() - (opponentData.lastOnline || 0);
                     if (offlineDuration >= 120000) { // 2 minutes
-                        // We are the winner, opponent is the runaway
                         const winnerColor = gameState.players.red?.id === user.id ? 'red' : 'black';
-
                         update(ref(db, `games/${currentGameId}`), {
                             gameStatus: 'ended',
                             winner: winnerColor,
@@ -279,13 +301,13 @@ export const useFirebase = (initialUserId: string | null) => {
 
         const interval = setInterval(checkRunaway, 10000); // Check every 10 seconds
         return () => clearInterval(interval);
-    }, [gameState?.gameStatus, currentGameId, user?.id, isAdmin]);
+    }, [gameState?.gameStatus, currentGameId, user?.id, isAdmin, gameState?.players.red?.id, gameState?.players.black?.id]);
 
     const toggleChatRoom = (inRoom: boolean) => {
         if (!user || !user.id) return;
         update(ref(db, `users/${user.id}`), {
             inChatRoom: inRoom,
-            isOnline: true  // Ensure user is marked as online
+            isOnline: true
         });
     };
 
@@ -336,7 +358,7 @@ export const useFirebase = (initialUserId: string | null) => {
         };
 
         set(ref(db, `games/${gameId}`), newGame);
-        // Notify the other player by updating challenge status
+        // Notify both players
         update(ref(db, `challenges/${user!.id}`), { status: 'accepted', gameId });
         update(ref(db, `challenges/${challenge.fromId}`), { status: 'accepted', gameId });
 
@@ -362,10 +384,7 @@ export const useFirebase = (initialUserId: string | null) => {
 
     const rejectChallenge = () => {
         if (isAdmin || !user) return;
-        // Increment rejection count
-        update(ref(db, `users/${user.id}`), {
-            rejections: increment(1)
-        });
+        update(ref(db, `users/${user.id}`), { rejections: increment(1) });
         remove(ref(db, `challenges/${user.id}`));
     };
 
@@ -393,14 +412,14 @@ export const useFirebase = (initialUserId: string | null) => {
                 board[to] = { ...attacker, position: to };
                 board[from] = null;
             } else {
-                return; // Invalid capture
+                return;
             }
         } else {
             if (isValidMove(from, to)) {
                 board[to] = { ...attacker, position: to };
                 board[from] = null;
             } else {
-                return; // Invalid move
+                return;
             }
         }
 
@@ -429,7 +448,6 @@ export const useFirebase = (initialUserId: string | null) => {
         if (!piece || piece.isFlipped) return;
 
         board[index] = { ...piece, isFlipped: true };
-
         let nextPlayer = gameState.currentPlayer === 'red' ? 'black' : 'red';
 
         update(ref(db, `games/${currentGameId}`), {
@@ -447,9 +465,7 @@ export const useFirebase = (initialUserId: string | null) => {
         const loserId = winnerColor === 'red' ? players.black?.id : players.red?.id;
 
         if (winnerId && winnerId !== ADMIN_ID) {
-            update(ref(db, `users/${winnerId}`), {
-                wins: increment(1)
-            });
+            update(ref(db, `users/${winnerId}`), { wins: increment(1) });
         }
         if (loserId && loserId !== ADMIN_ID) {
             const updates: any = { losses: increment(1) };
@@ -478,7 +494,6 @@ export const useFirebase = (initialUserId: string | null) => {
         const rematchRef = ref(db, `games/${currentGameId}/rematch/${color}`);
         set(rematchRef, true);
 
-        // Check if both agreed
         if (gameState.rematch?.[otherColor]) {
             const initialBoard = initializeBoard();
             update(ref(db, `games/${currentGameId}`), {
@@ -497,10 +512,8 @@ export const useFirebase = (initialUserId: string | null) => {
 
     const exitGame = () => {
         if (!user || !user.id || !currentGameId) return;
-
         remove(ref(db, `games/${currentGameId}/spectators/${user.id}`));
         update(ref(db, `users/${user.id}`), { activeGameId: null });
-
         setCurrentGameId(null);
         toggleChatRoom(true);
     };
@@ -516,7 +529,6 @@ export const useFirebase = (initialUserId: string | null) => {
         if (!isAdmin) return;
         await remove(ref(db, 'games'));
         await remove(ref(db, 'challenges'));
-        // Clear all users activeGameId
         const usersRef = ref(db, 'users');
         onValue(usersRef, (snapshot) => {
             const data = snapshot.val();
@@ -533,7 +545,6 @@ export const useFirebase = (initialUserId: string | null) => {
     const clearUsers = async () => {
         if (!isAdmin) return;
         await remove(ref(db, 'users'));
-        // Special case: we don't want to log out the current admin
     };
 
     const clearStats = async () => {
