@@ -45,6 +45,8 @@ export interface UserProfile {
   name: string;
   wins: number;
   losses: number;
+  surrenders: number;
+  runaways: number;
   lastOnline: number;
   inChatRoom: boolean;
   isOnline: boolean;

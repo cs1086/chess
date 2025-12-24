@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ref, set, onValue, push, update, remove, onDisconnect } from 'firebase/database';
+import { ref, set, onValue, push, update, remove, onDisconnect, increment } from 'firebase/database';
 import { db } from '../firebase/config';
 import type { UserProfile, ChatMessage, Challenge, GameState } from '../types';
 import { initializeBoard, canCapture, isValidMove, checkWinner } from '../utils/gameLogic';
@@ -27,6 +27,8 @@ export const useFirebase = (initialUserId: string | null) => {
                     name: initialUserId,
                     wins: 0,
                     losses: 0,
+                    surrenders: 0,
+                    runaways: 0,
                     lastOnline: Date.now(),
                     inChatRoom: false,
                     isOnline: true
@@ -36,13 +38,21 @@ export const useFirebase = (initialUserId: string | null) => {
                 // Ensure id is always set, even if missing from database
                 const userData = snapshot.val() as UserProfile;
                 setUser({ ...userData, id: initialUserId, name: userData.name || initialUserId });
+
+                // Restore active game if exists
+                if (userData.activeGameId && !currentGameId) {
+                    setCurrentGameId(userData.activeGameId);
+                }
             }
         });
 
         // Handle online status
-        const statusRef = ref(db, `users/${initialUserId}/isOnline`);
-        onDisconnect(statusRef).set(false);
-        set(statusRef, true);
+        const statusRef = ref(db, `users/${initialUserId}`);
+        onDisconnect(statusRef).update({
+            isOnline: false,
+            lastOnline: Date.now()
+        });
+        update(statusRef, { isOnline: true });
 
         // Leaderboard and online players
         const allUsersRef = ref(db, 'users');
@@ -140,6 +150,41 @@ export const useFirebase = (initialUserId: string | null) => {
         return () => unsubscribeGame();
     }, [currentGameId]);
 
+    // Runaway Monitoring (2 minutes timeout)
+    useEffect(() => {
+        if (!gameState || gameState.gameStatus !== 'playing' || !user || !currentGameId) return;
+
+        const opponentId = gameState.players.red?.id === user.id
+            ? gameState.players.black?.id
+            : gameState.players.red?.id;
+
+        if (!opponentId) return;
+
+        const checkRunaway = () => {
+            const opponentRef = ref(db, `users/${opponentId}`);
+            onValue(opponentRef, (snapshot) => {
+                const opponentData = snapshot.val() as UserProfile;
+                if (opponentData && !opponentData.isOnline) {
+                    const offlineDuration = Date.now() - (opponentData.lastOnline || 0);
+                    if (offlineDuration >= 120000) { // 2 minutes
+                        // We are the winner, opponent is the runaway
+                        const winnerColor = gameState.players.red?.id === user.id ? 'red' : 'black';
+
+                        update(ref(db, `games/${currentGameId}`), {
+                            gameStatus: 'ended',
+                            winner: winnerColor,
+                            endReason: 'runaway'
+                        });
+                        updateStats(winnerColor, 'runaway');
+                    }
+                }
+            }, { onlyOnce: true });
+        };
+
+        const interval = setInterval(checkRunaway, 10000); // Check every 10 seconds
+        return () => clearInterval(interval);
+    }, [gameState?.gameStatus, currentGameId, user?.id]);
+
     const toggleChatRoom = (inRoom: boolean) => {
         if (!user || !user.id) return;
         update(ref(db, `users/${user.id}`), {
@@ -156,8 +201,12 @@ export const useFirebase = (initialUserId: string | null) => {
             fromName: user.name,
             content,
             timestamp: Date.now(),
-            to
         };
+
+        if (to) {
+            newMessage.to = to;
+        }
+
         push(ref(db, 'chat/messages'), newMessage);
     };
 
@@ -267,7 +316,7 @@ export const useFirebase = (initialUserId: string | null) => {
         });
 
         if (winner) {
-            updateStats(winner);
+            updateStats(winner, 'normal');
         }
     };
 
@@ -292,16 +341,23 @@ export const useFirebase = (initialUserId: string | null) => {
         });
     };
 
-    const updateStats = (winner: string) => {
+    const updateStats = (winnerColor: string, reason: 'normal' | 'surrender' | 'runaway' = 'normal') => {
         if (!gameState) return;
-        const isWinner = (gameState.players.red?.id === user?.id && winner === 'red') ||
-            (gameState.players.black?.id === user?.id && winner === 'black');
+        const players = gameState.players;
+        const winnerId = winnerColor === 'red' ? players.red?.id : players.black?.id;
+        const loserId = winnerColor === 'red' ? players.black?.id : players.red?.id;
 
-        const userRef = ref(db, `users/${user?.id}`);
-        update(userRef, {
-            wins: isWinner ? (user?.wins || 0) + 1 : (user?.wins || 0),
-            losses: isWinner ? (user?.losses || 0) : (user?.losses || 0) + 1
-        });
+        if (winnerId) {
+            update(ref(db, `users/${winnerId}`), {
+                wins: increment(1)
+            });
+        }
+        if (loserId) {
+            const updates: any = { losses: increment(1) };
+            if (reason === 'surrender') updates.surrenders = increment(1);
+            if (reason === 'runaway') updates.runaways = increment(1);
+            update(ref(db, `users/${loserId}`), { ...updates });
+        }
     };
 
     const surrender = () => {
@@ -309,9 +365,10 @@ export const useFirebase = (initialUserId: string | null) => {
         const winner = gameState.players.red?.id === user?.id ? 'black' : 'red';
         update(ref(db, `games/${currentGameId}`), {
             gameStatus: 'ended',
-            winner
+            winner,
+            endReason: 'surrender'
         });
-        updateStats(winner);
+        updateStats(winner, 'surrender');
     };
 
     const requestRematch = () => {

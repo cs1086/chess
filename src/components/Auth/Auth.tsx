@@ -10,9 +10,14 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        const alphanumeric = /^[a-z0-9]+$/i;
-        if (!alphanumeric.test(userId)) {
-            setError('ID 只能包含英文和數字');
+        // Allow Chinese characters (\u4e00-\u9fa5), letters, and numbers
+        const validIdPattern = /^[\u4e00-\u9fa5a-zA-Z0-9_-]+$/;
+        if (!userId.trim()) {
+            setError('ID 不能為空');
+            return;
+        }
+        if (!validIdPattern.test(userId)) {
+            setError('ID 只能包含中文、英文、數字、下劃線或連字號');
             return;
         }
         onLogin(userId);
