@@ -106,8 +106,6 @@ export const useFirebase = (initialUserId: string | null) => {
                 });
 
                 // Admin logic: 
-                // 1. Admin not in leaderboard
-                // 2. Admin not in online players (others can't see admin)
                 setLeaderboard(users.filter(u => u.id !== ADMIN_ID).sort((a, b) => {
                     const winRateA = (a.wins + a.losses > 0) ? (a.wins / (a.wins + a.losses)) : 0;
                     const winRateB = (b.wins + b.losses > 0) ? (b.wins / (b.wins + b.losses)) : 0;
@@ -119,7 +117,7 @@ export const useFirebase = (initialUserId: string | null) => {
                     return b.wins - a.wins; // Final tie-breaker
                 }).slice(0, 10));
 
-                setOnlinePlayers(users.filter(u => u.isOnline === true && u.id !== ADMIN_ID));
+                setOnlinePlayers(users.filter(u => u.isOnline === true && (u.inChatRoom || u.activeGameId) && u.id !== ADMIN_ID));
             }
         });
 
@@ -184,10 +182,7 @@ export const useFirebase = (initialUserId: string | null) => {
             const data = snapshot.val();
             if (data) {
                 const rawBoard = data.board || [];
-                // Ensure board is always a proper 32-element array even if Firebase returns it as an object
                 const normalizedBoard = Array.from({ length: 32 }, (_, i) => rawBoard[i] || null);
-
-                // Normalize spectators from object to array
                 const spectators = data.spectators ? Object.values(data.spectators) as UserProfile[] : [];
 
                 setGameState({
@@ -221,7 +216,6 @@ export const useFirebase = (initialUserId: string | null) => {
             }
             exitGame();
         } else if (reason === 'surrender' && !isPlayer) {
-            // Alert spectators if a player surrenders
             const surrenderColor = gameState.winner === 'red' ? '黑色' : '紅色';
             alert(`由於 ${surrenderColor} 玩家投降，遊戲已結束。系統將帶您回聊天室。`);
             exitGame();
@@ -231,37 +225,48 @@ export const useFirebase = (initialUserId: string | null) => {
     // Handle players leaving after game ends
     useEffect(() => {
         if (isAdmin || !gameState || gameState.gameStatus !== 'ended' || !user || !currentGameId) return;
-        if (gameState.endReason === 'runaway') return;
+        if (gameState.endReason === 'runaway' || gameState.endReason === 'surrender') return;
 
         const isPlayer = gameState.players.red?.id === user.id || gameState.players.black?.id === user.id;
 
         if (isPlayer) {
+            // Player monitoring opponent
             const opponentId = gameState.players.red?.id === user.id ? gameState.players.black?.id : gameState.players.red?.id;
             if (!opponentId) return;
             const opponentRef = ref(db, `users/${opponentId}`);
             const unsubscribeOpponent = onValue(opponentRef, (snapshot) => {
                 const opponentData = snapshot.val() as UserProfile;
                 if (opponentData) {
-                    const hasLeft = opponentData.activeGameId !== currentGameId || !opponentData.isOnline;
-                    if (hasLeft) {
+                    // Only alert if they actually changed their activeGameId (not just offline)
+                    if (opponentData.activeGameId !== currentGameId) {
                         alert('對手已離開或不願意續戰，系統將自動帶您回聊天室。');
                         exitGame();
                     }
                 }
             });
             return () => unsubscribeOpponent();
-        } else if (gameState.endReason !== 'surrender') {
-            // Spectators: Monitor both players (if not already handled by surrender/runaway alerts)
+        } else {
+            // Spectator monitoring BOTH players
             const redId = gameState.players.red?.id;
             const blackId = gameState.players.black?.id;
             if (!redId || !blackId) return;
 
-            const checkPlayers = (snapshot: any) => {
-                const pData = snapshot.val() as UserProfile;
-                if (pData && (pData.activeGameId !== currentGameId || !pData.isOnline)) {
-                    alert('對戰雙方已離開，系統將自動帶您回聊天室。');
-                    exitGame();
-                }
+            const checkPlayers = () => {
+                // Fetch latest data for both players
+                const redRef = ref(db, `users/${redId}`);
+                const blackRef = ref(db, `users/${blackId}`);
+
+                onValue(redRef, (redSnap) => {
+                    const redData = redSnap.val() as UserProfile;
+                    onValue(blackRef, (blackSnap) => {
+                        const blackData = blackSnap.val() as UserProfile;
+                        // For spectators: ONLY kick if BOTH players have actually left the room
+                        if (redData && blackData && redData.activeGameId !== currentGameId && blackData.activeGameId !== currentGameId) {
+                            alert('對戰雙方均已離開，系統將自動帶您回聊天室。');
+                            exitGame();
+                        }
+                    }, { onlyOnce: true });
+                }, { onlyOnce: true });
             };
 
             const unsubRed = onValue(ref(db, `users/${redId}`), checkPlayers);
@@ -358,7 +363,6 @@ export const useFirebase = (initialUserId: string | null) => {
         };
 
         set(ref(db, `games/${gameId}`), newGame);
-        // Notify both players
         update(ref(db, `challenges/${user!.id}`), { status: 'accepted', gameId });
         update(ref(db, `challenges/${challenge.fromId}`), { status: 'accepted', gameId });
 
