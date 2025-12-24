@@ -91,13 +91,14 @@ export const useFirebase = (initialUserId: string | null) => {
                     };
                 });
                 setLeaderboard(users.filter(u => u.id !== ADMIN_ID && (u.wins + u.losses > 0)).sort((a, b) => {
+                    if (b.wins !== a.wins) return b.wins - a.wins;
                     const winRateA = (a.wins + a.losses > 0) ? (a.wins / (a.wins + a.losses)) : 0;
                     const winRateB = (b.wins + b.losses > 0) ? (b.wins / (b.wins + b.losses)) : 0;
                     if (winRateB !== winRateA) return winRateB - winRateA;
                     if (a.runaways !== b.runaways) return a.runaways - b.runaways;
                     if (a.surrenders !== b.surrenders) return a.surrenders - b.surrenders;
                     if (a.rejections !== b.rejections) return a.rejections - b.rejections;
-                    return b.wins - a.wins;
+                    return 0;
                 }).slice(0, 10));
                 setOnlinePlayers(users.filter(u => u.isOnline === true && (u.inChatRoom || u.activeGameId) && u.id !== ADMIN_ID));
             }
