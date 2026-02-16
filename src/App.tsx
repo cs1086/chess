@@ -44,6 +44,7 @@ const App: React.FC = () => {
     performKong,
     performHu,
     skipAction,
+    startNextRound,
     toggleReady,
     playBigTwoCards,
     passBigTwoTurn
@@ -79,7 +80,7 @@ const App: React.FC = () => {
       );
     } else if (currentRoom.gameType === 'mahjong' && mahjongState) {
       return (
-        <div className="min-h-screen bg-[#1a120b] flex flex-col items-center justify-center p-2 md:p-4">
+        <div className="h-screen w-screen bg-[#1a120b] flex items-center justify-center overflow-hidden">
           <MahjongBoard
             gameState={mahjongState}
             currentUserId={user.id}
@@ -89,15 +90,15 @@ const App: React.FC = () => {
             onChi={performChi}
             onHu={performHu}
             onSkip={skipAction}
+            onExit={exitGame}
           />
-          <button
-            onClick={exitGame}
-            className="mt-4 px-6 py-2 bg-gray-800 text-gray-400 rounded-lg hover:bg-gray-700 transition-colors"
-          >
-            退出遊戲
-          </button>
-          {mahjongState.gameStatus === 'ended' && mahjongState.scoringResult && (
-            <MahjongResult gameState={mahjongState} onExit={exitGame} />
+          {mahjongState.gameStatus === 'ended' && (
+            <MahjongResult
+              gameState={mahjongState}
+              onNextRound={startNextRound}
+              onExit={exitGame}
+              isHost={currentRoom.hostId === user.id}
+            />
           )}
         </div>
       );
@@ -128,7 +129,10 @@ const App: React.FC = () => {
           <h1 className="text-3xl font-bold mb-4">開發中</h1>
           <p className="mb-8">此遊戲模式尚未實作。</p>
           <button
-            onClick={exitGame}
+            onClick={() => {
+              console.log("App: Exit button clicked");
+              exitGame();
+            }}
             className="px-6 py-2 bg-[#8b5a2b] text-white rounded-lg hover:bg-[#6d4621]"
           >
             離開遊戲

@@ -62,15 +62,26 @@ export function shuffleTiles(tiles: MahjongTile[]): MahjongTile[] {
 }
 
 export function sortHand(hand: MahjongTile[]): MahjongTile[] {
-    const suitOrder: Record<MahjongSuit, number> = {
-        'wan': 0, 'tong': 1, 'tiao': 2, 'wind': 3, 'dragon': 4
+    const suitOrder: Record<string, number> = {
+        'wan': 0,
+        'tong': 1,
+        'tiao': 2,
+        'wind': 3,
+        'dragon': 4,
+        'flower': 5
     };
 
     return [...hand].sort((a, b) => {
-        if (suitOrder[a.suit] !== suitOrder[b.suit]) {
-            return suitOrder[a.suit] - suitOrder[b.suit];
+        // Suit comparison
+        const orderA = suitOrder[a.suit] ?? 99;
+        const orderB = suitOrder[b.suit] ?? 99;
+
+        if (orderA !== orderB) {
+            return orderA - orderB;
         }
-        return a.value - b.value;
+
+        // Value comparison within same suit
+        return (a.value || 0) - (b.value || 0);
     });
 }
 
@@ -96,7 +107,9 @@ export function dealTiles(shuffledTiles: MahjongTile[]): {
     if (dealerTile) hands[0].push(dealerTile);
 
     // Sort hands efficiently
-    hands.forEach(hand => sortHand(hand));
+    for (let i = 0; i < 4; i++) {
+        hands[i] = sortHand(hands[i]);
+    }
 
     return {
         hands,
@@ -105,44 +118,64 @@ export function dealTiles(shuffledTiles: MahjongTile[]): {
 }
 
 export function canPong(hand: MahjongTile[], tile: MahjongTile): boolean {
+    if (!hand || !tile || hand.length < 2) return false;
     const count = hand.filter(t => t.suit === tile.suit && t.value === tile.value).length;
     return count >= 2;
 }
 
 export function canKong(hand: MahjongTile[], tile: MahjongTile): boolean {
+    if (!hand || !tile || hand.length < 3) return false;
     const count = hand.filter(t => t.suit === tile.suit && t.value === tile.value).length;
     return count === 3;
 }
 
 export function canChi(hand: MahjongTile[], tile: MahjongTile): boolean {
+    if (!hand || !tile || hand.length < 2) return false;
     // Chi only for number suits (Wan, Tong, Tiao)
     if (['wind', 'dragon'].includes(tile.suit)) return false;
 
-    // Need to find combinations like (v-2, v-1), (v-1, v+1), (v+1, v+2)
     const sameSuit = hand.filter(t => t.suit === tile.suit);
     const v = tile.value;
 
     const has = (val: number) => sameSuit.some(t => t.value === val);
 
-    // 1. Left (v+1, v+2)
     if (has(v + 1) && has(v + 2)) return true;
-    // 2. Middle (v-1, v+1)
     if (has(v - 1) && has(v + 1)) return true;
-    // 3. Right (v-2, v-1)
     if (has(v - 2) && has(v - 1)) return true;
-
 
     return false;
 }
 
+export function findChiTiles(hand: MahjongTile[], tile: MahjongTile): MahjongTile[][] {
+    if (!canChi(hand, tile)) return [];
+    const v = tile.value;
+    const sameSuit = hand.filter(t => t.suit === tile.suit);
+    const has = (val: number) => sameSuit.filter(t => t.value === val);
+
+    const options: MahjongTile[][] = [];
+
+    // Case 1: [v+1, v+2]
+    const s1 = has(v + 1), s2 = has(v + 2);
+    if (s1.length > 0 && s2.length > 0) options.push([s1[0], s2[0]]);
+
+    // Case 2: [v-1, v+1]
+    const m1 = has(v - 1), m2 = has(v + 1);
+    if (m1.length > 0 && m2.length > 0) options.push([m1[0], m2[0]]);
+
+    // Case 3: [v-2, v-1]
+    const b1 = has(v - 2), b2 = has(v - 1);
+    if (b1.length > 0 && b2.length > 0) options.push([b1[0], b2[0]]);
+
+    return options;
+}
+
 export function checkHu(hand: MahjongTile[]): boolean {
+    if (!hand || hand.length < 2) return false;
     // Taiwan 16-tile Mahjong: 17 tiles to win (16 in hand + 1 new)
     // Needs 5 sets (Pong/Kong/Chi) + 1 pair (Eye)
-    // Note: Kongs are already sets, but in `hand` array they might be just tiles if not melded.
-    // However, declared Melds are stored separately in `player.melds`.
-    // The `hand` passed here typically only contains undeclared tiles.
-    // So we need to check if the remaining `hand` can form (5 - undeclaredMelds) sets + 1 pair.
-    // But `checkHu` usually takes the full array of tiles including the new one.
+    // The hand passed here includes the new tile.
+    // Winning hand: (n*3 + 2) tiles where n = number of sets
+    if (hand.length % 3 !== 2) return false;
 
     // Standard approach:
     // Sort hand
@@ -226,4 +259,58 @@ function canFormSets(tiles: MahjongTile[]): boolean {
     }
 
     return false;
+}
+
+export interface WaitingStatus {
+    hu: string[];
+    pong: string[];
+    kong: string[];
+    chi: string[];
+}
+
+export function getWaitingStatus(hand: MahjongTile[]): WaitingStatus {
+    const status: WaitingStatus = { hu: [], pong: [], kong: [], chi: [] };
+    if (!hand || hand.length === 0) return status;
+
+    const uniqueTiles: { suit: MahjongSuit, value: number, name: string }[] = [];
+
+    // Helper to get name
+    const getName = (s: MahjongSuit, v: number) => {
+        if (s === 'wan') return `${v}萬`;
+        if (s === 'tong') return `${v}筒`;
+        if (s === 'tiao') return `${v}索`;
+        if (s === 'wind') return ['東', '南', '西', '北'][v - 1] + '風';
+        if (s === 'dragon') return ['中', '發', '白'][v - 1];
+        return `${s}-${v}`;
+    };
+
+    // 1. Get unique tile types to check
+    const suits: MahjongSuit[] = ['wan', 'tong', 'tiao', 'wind', 'dragon'];
+    for (const s of suits) {
+        const maxVal = (s === 'wind') ? 4 : (s === 'dragon') ? 3 : 9;
+        for (let v = 1; v <= maxVal; v++) {
+            uniqueTiles.push({ suit: s, value: v, name: getName(s, v) });
+        }
+    }
+
+    // 2. Check each tile
+    for (const t of uniqueTiles) {
+        const dummyTile = { id: 'dummy', suit: t.suit, value: t.value, index: 0 };
+
+        // Hu? (Only if hand size is correct for 17-tile win: 16 in hand + 1 dummy)
+        if (hand.length === 16) {
+            if (checkHu([...hand, dummyTile])) status.hu.push(t.name);
+        }
+
+        // Pong?
+        if (canPong(hand, dummyTile)) status.pong.push(t.name);
+
+        // Kong?
+        if (canKong(hand, dummyTile)) status.kong.push(t.name);
+
+        // Chi?
+        if (canChi(hand, dummyTile)) status.chi.push(t.name);
+    }
+
+    return status;
 }

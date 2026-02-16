@@ -135,15 +135,16 @@ export interface MahjongPlayer {
 
 export interface MahjongGameState {
   players: MahjongPlayer[];
-  wallCount: number; // Only need count for client usually, but for validity maybe full generic?
-  // Actually full implementation needs wall on server.
+  wallCount: number;
   wall: MahjongTile[];
   currentTurn: string; // playerId
   dice: number[];
   prevailingWind: number; // 0:East, 1:South...
   dealer: number; // seat index 0-3
   round: number;
+  totalRounds: number; // total rounds to play (e.g. 16)
   gameStatus: 'waiting' | 'playing' | 'ended';
+  endReason?: 'hu' | 'zimo' | 'exhaustive_draw'; // why this round ended
   lastDiscard?: {
     tile: MahjongTile;
     player: string;
@@ -153,8 +154,8 @@ export interface MahjongGameState {
   winningHand?: MahjongTile[];
   pendingAction?: {
     tile: MahjongTile;
-    fromPlayer: string; // The player who discarded
-    targetPlayers: string[]; // Players who can claim (e.g., next player for Chi, any for Pong)
+    fromPlayer: string;
+    targetPlayers: string[];
     actions: {
       playerId: string;
       canChi?: boolean;
@@ -172,6 +173,9 @@ export interface MahjongGameState {
   isZimo?: boolean;
   isLastTile?: boolean;
   isKongDraw?: boolean;
+  lastDrawnTileId?: string | null;
+  discardedTiles?: MahjongTile[];
+  lianZhuangCount?: number;
 }
 
 // --- Big Two Types ---

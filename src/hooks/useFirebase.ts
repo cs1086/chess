@@ -2,11 +2,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { ref, set, onValue, push, update, remove, onDisconnect, increment } from 'firebase/database';
 import { db } from '../firebase/config';
-import type { UserProfile, ChatMessage, GameState, Room, GameType, MahjongGameState, MahjongPlayer, Piece, BigTwoGameState, BigTwoPlayer, BigTwoPlay } from '../types';
+import type { UserProfile, ChatMessage, GameState, Room, GameType, MahjongGameState, MahjongPlayer, MahjongTile, Piece, BigTwoGameState, BigTwoPlayer, BigTwoPlay } from '../types';
 import { initializeBoard, canCapture, isValidMove, checkWinner } from '../utils/gameLogic';
 import {
     initializeMahjongDeck, shuffleTiles, dealTiles,
-    canChi, canPong, canKong, checkHu
+    canChi, canPong, canKong, findChiTiles, checkHu, sortHand
 } from '../utils/mahjongLogic';
 import { calculateScore } from '../utils/mahjongScoring';
 import {
@@ -364,29 +364,39 @@ export const useFirebase = (initialUserId: string | null) => {
             const tiles = shuffleTiles(initializeMahjongDeck());
             const { hands, wall } = dealTiles(tiles);
 
-            // Define players
-            // Ensure we have exactly 4 players for Mahjong
-            const playersList: MahjongPlayer[] = activePlayers.slice(0, 4).map((p, index) => ({
-                id: p.id,
-                name: p.name,
-                wind: index,
-                hand: hands[index],
+            const d1 = Math.floor(Math.random() * 6) + 1;
+            const d2 = Math.floor(Math.random() * 6) + 1;
+            const d3 = Math.floor(Math.random() * 6) + 1;
+            const dice = [d1, d2, d3];
+            const diceSum = d1 + d2 + d3;
+            const dealerIndex = (diceSum - 1) % 4;
 
-                melds: [],
-                discarded: [],
-                score: 0
-            }));
+            const playersList: MahjongPlayer[] = activePlayers.slice(0, 4).map((p, index) => {
+                const relativeIndex = (index - dealerIndex + 4) % 4;
+                return {
+                    id: p.id,
+                    name: p.name,
+                    wind: relativeIndex,
+                    hand: hands[relativeIndex],
+                    melds: [],
+                    discarded: [],
+                    score: 0
+                };
+            });
 
             newMahjongGame = {
                 players: playersList,
                 wall,
                 wallCount: wall.length,
-                currentTurn: playersList[0].id, // Dealer starts
-                dice: [1, 1, 1], // Placeholder
+                currentTurn: playersList[dealerIndex].id, // Dealer starts
+                dice: dice,
                 prevailingWind: 0, // East
-                dealer: 0,
+                dealer: dealerIndex,
                 gameStatus: 'playing',
-                round: 1
+                round: 1,
+                totalRounds: 16,
+                discardedTiles: [],
+                lianZhuangCount: 0
             };
         } else if (currentRoom.gameType === 'big_two') {
             const deck = shuffleBigTwoDeck(initializeBigTwoDeck());
@@ -439,6 +449,16 @@ export const useFirebase = (initialUserId: string | null) => {
             setCurrentGameId(gameId);
         } else if (newMahjongGame) {
             await set(ref(db, `games/${gameId}`), newMahjongGame);
+            await update(ref(db, `rooms/${currentRoom.id}`), {
+                status: 'playing',
+            });
+            currentRoom.players.forEach(p => {
+                update(ref(db, `users/${p.id}`), { activeGameId: gameId });
+            });
+            setCurrentGameId(gameId);
+        } else if (currentRoom.gameType !== 'big_two') {
+            // Placeholder for other games (Big Two is handled above)
+            // Just set the status to playing so they see the "開發中" screen
             await update(ref(db, `rooms/${currentRoom.id}`), {
                 status: 'playing',
             });
@@ -533,8 +553,53 @@ export const useFirebase = (initialUserId: string | null) => {
                     setBigTwoState(btState);
                     setGameState(null);
                     setMahjongState(null);
-                } else if (data.wall) {
-                    setMahjongState(data as MahjongGameState);
+                } else if (data.wall !== undefined || data.prevailingWind !== undefined) {
+                    // Mahjong game - normalize all arrays from Firebase
+                    const toArray = (val: any): any[] => {
+                        if (!val) return [];
+                        if (Array.isArray(val)) return val;
+                        if (typeof val === 'object') return Object.values(val);
+                        return [];
+                    };
+
+                    const normalizedPlayers = toArray(data.players).map((p: any) => ({
+                        ...p,
+                        hand: toArray(p.hand),
+                        discarded: toArray(p.discarded),
+                        melds: toArray(p.melds).map((m: any) => ({
+                            ...m,
+                            tiles: toArray(m.tiles)
+                        })),
+                        score: p.score || 0,
+                        wind: p.wind ?? 0,
+                    }));
+
+                    const normalizedState: MahjongGameState = {
+                        ...data,
+                        players: normalizedPlayers,
+                        wall: toArray(data.wall),
+                        wallCount: data.wallCount ?? toArray(data.wall).length,
+                        dice: toArray(data.dice),
+                        prevailingWind: data.prevailingWind ?? 0,
+                        dealer: data.dealer ?? 0,
+                        round: data.round ?? 1,
+                        gameStatus: data.gameStatus || 'playing',
+                        currentTurn: data.currentTurn || '',
+                        discardedTiles: toArray(data.discardedTiles),
+                    };
+
+                    // Normalize pendingAction if present
+                    if (data.pendingAction) {
+                        normalizedState.pendingAction = {
+                            ...data.pendingAction,
+                            tile: data.pendingAction.tile,
+                            fromPlayer: data.pendingAction.fromPlayer,
+                            targetPlayers: toArray(data.pendingAction.targetPlayers),
+                            actions: toArray(data.pendingAction.actions),
+                        };
+                    }
+
+                    setMahjongState(normalizedState);
                     setGameState(null);
                     setBigTwoState(null);
                 } else {
@@ -673,13 +738,20 @@ export const useFirebase = (initialUserId: string | null) => {
     };
 
     const exitGame = async () => {
-        if (!user || (!user.id && !user.name) || !currentGameId) return;
-        await update(ref(db, `users/${user.id}`), { activeGameId: null });
+        console.log("useFirebase: exitGame called", { userId: user?.id, currentGameId, roomId: currentRoom?.id });
+        if (!user) return;
+
+        // Always try to clear activeGameId in DB if user is logged in
+        if (user.id) {
+            await update(ref(db, `users/${user.id}`), { activeGameId: null });
+        }
+
         setCurrentGameId(null);
-        // User remains in room
+
+        // User remains in room, but we reset room status to waiting
         if (currentRoom) {
             // Reset all players to not ready
-            const resetPlayers = currentRoom.players.map(p => ({ ...p, isReady: false }));
+            const resetPlayers = (currentRoom.players || []).map(p => ({ ...p, isReady: false }));
             await update(ref(db, `rooms/${currentRoom.id}`), {
                 status: 'waiting',
                 players: resetPlayers
@@ -705,102 +777,113 @@ export const useFirebase = (initialUserId: string | null) => {
 
     const drawMahjongTile = async () => {
         if (!mahjongState || !currentGameId || !user) return;
+        if (mahjongState.gameStatus !== 'playing') return;
+        if (mahjongState.pendingAction) return; // Don't draw while there's a pending action
+
         const currentPlayerId = mahjongState.currentTurn;
+        if (currentPlayerId !== user.id && !currentPlayerId.startsWith('bot_')) return;
 
-        // Validation
-        if (currentPlayerId !== user.id && !currentPlayerId.startsWith('bot_')) return; // Only current player can draw (or host for bot)
-
-        // Check if hand is already full (17 tiles)
         const playerIndex = mahjongState.players.findIndex(p => p.id === currentPlayerId);
         if (playerIndex === -1) return;
         const player = mahjongState.players[playerIndex];
-        if ((player.hand || []).length % 3 === 2) return; // Already 17 (16+1) or similar. Standard 16-tile mahjong: 16 hand + 1 draw = 17.
+        const hand = player.hand || [];
+        const meldCount = (player.melds || []).length;
+        const effectiveSize = hand.length + meldCount * 3;
 
-        if (mahjongState.wall.length === 0) {
-            alert("荒局 (流局)");
-            update(ref(db, `rooms/${currentRoom?.id}`), { status: 'ended' });
+        // Already has enough tiles to discard (17 effective tiles)
+        if (effectiveSize >= 17) return;
+
+        const wall = mahjongState.wall || [];
+        // Taiwan 16-tile Mahjong: 16 tiles are reserved at the end.
+        // If normal draw would take from these 16, it's a draw (和局).
+        if (wall.length <= 16) {
+            // 流局 (Exhaustive draw)
+            await update(ref(db, `games/${currentGameId}`), {
+                gameStatus: 'ended',
+                endReason: 'exhaustive_draw',
+                pendingAction: null
+            });
+            await update(ref(db, `rooms/${currentRoom?.id}`), { status: 'ended' });
             return;
         }
 
-        const newWall = [...mahjongState.wall];
-        const tile = newWall.pop(); // Draw from end or front? Usually front.
-        // Array.pop() takes from end. Let's say index 0 is front. 
-        // Array.shift() takes from front.
-        // Let's use shift for "front" of wall.
-        // const tile = newWall.shift(); 
-        // Actually, dealing usually takes from start. 
-        // Let's assume initialized wall is [front ... back].
-
-        // Wait, pop() is O(1), shift() is O(n). 
-        // Let's just treat end of array as front of wall for performance, or just use pop. 
-        // It's random anyway.
-
+        const newWall = [...wall];
+        const tile = newWall.pop();
         if (!tile) return;
 
         const newPlayers = [...mahjongState.players];
         newPlayers[playerIndex] = {
             ...player,
-            hand: [...(player.hand || []), tile]
+            hand: sortHand([...hand, tile])
         };
 
         // Check Zimo (Self Draw Win)
         const canZimo = checkHu(newPlayers[playerIndex].hand);
 
         if (canZimo) {
-            // For Zimo, we create a pendingAction where the player is BOTH fromPlayer and target
             await update(ref(db, `games/${currentGameId}`), {
                 wall: newWall,
                 wallCount: newWall.length,
                 players: newPlayers,
+                lastDrawnTileId: tile.id,
                 pendingAction: {
-                    tile, // The drawn tile (already in hand, but useful context)
+                    tile,
                     fromPlayer: currentPlayerId,
                     targetPlayers: [currentPlayerId],
-                    actions: [{
-                        playerId: currentPlayerId,
-                        canHu: true
-                    }]
+                    actions: [{ playerId: currentPlayerId, canHu: true }]
                 }
             });
         } else {
             await update(ref(db, `games/${currentGameId}`), {
                 wall: newWall,
                 wallCount: newWall.length,
-                players: newPlayers
+                players: newPlayers,
+                lastDrawnTileId: tile.id,
             });
         }
     };
 
     const discardMahjongTile = async (tileId: string) => {
-        if (!mahjongState || !currentGameId) return; // Removed user check to allow bot actions
+        console.log('discardMahjongTile called:', tileId);
+        if (!mahjongState || !currentGameId) {
+            console.log('Discard failed: state or gameId missing', { mahjongState: !!mahjongState, currentGameId });
+            return;
+        }
+        if (mahjongState.gameStatus !== 'playing') {
+            console.log('Discard failed: game not in playing status', mahjongState.gameStatus);
+            return;
+        }
+        if (mahjongState.pendingAction) {
+            console.log('Discard failed: pending action exists', mahjongState.pendingAction);
+            return; // Can't discard while pending action
+        }
+
         const currentPlayerId = mahjongState.currentTurn;
+        if (currentPlayerId !== user?.id && !currentPlayerId.startsWith('bot_')) {
+            console.log('Discard failed: Not your turn or not a bot', { current: currentPlayerId, me: user?.id });
+            return;
+        }
+
         const playerIndex = mahjongState.players.findIndex(p => p.id === currentPlayerId);
         if (playerIndex === -1) return;
         const player = mahjongState.players[playerIndex];
+        const hand = player.hand || [];
 
-        // Validate ownership
-        const tileIndex = (player.hand || []).findIndex(t => t.id === tileId);
+        const tileIndex = hand.findIndex(t => t.id === tileId);
         if (tileIndex === -1) return;
 
-        const tile = (player.hand || [])[tileIndex];
-        const newHand = [...(player.hand || [])];
+        const tile = hand[tileIndex];
+        const newHand = [...hand];
         newHand.splice(tileIndex, 1);
-        // Sort hand? Maybe not auto-sort, keep position?
-        // Usually auto-sort in UI or logic is helpful.
-        newHand.sort((a, b) => {
-            // specific sort order... simplified here or use helper
-            if (a.suit !== b.suit) return a.suit.localeCompare(b.suit);
-            return a.value - b.value;
-        });
 
         const newPlayers = [...mahjongState.players];
         newPlayers[playerIndex] = {
             ...player,
-            hand: newHand,
+            hand: sortHand(newHand),
             discarded: [...(player.discarded || []), tile]
         };
 
-        // --- Checks for Melds (Chi, Pong, Kong, Hu) ---
+        // Check if other players can claim the discarded tile (Chi, Pong, Kong, Hu)
         const pendingActions: {
             playerId: string;
             canChi?: boolean;
@@ -809,166 +892,326 @@ export const useFirebase = (initialUserId: string | null) => {
             canHu?: boolean;
         }[] = [];
 
-        mahjongState.players.forEach(p => {
-            if (p.id === currentPlayerId) return; // Cannot claim own discard
+        for (const p of mahjongState.players) {
+            if (p.id === currentPlayerId) continue;
+            if (!p.hand || p.hand.length === 0) continue;
 
-            // Pong/Kong (Any player)
-            // Assuming canPong and canKong are defined elsewhere
-            const pong = canPong(p.hand, tile);
-            const kong = canKong(p.hand, tile);
+            try {
+                const pongResult = canPong(p.hand, tile);
+                const kongResult = canKong(p.hand, tile);
+                const isNextPlayer = (p.wind === (player.wind + 1) % 4);
+                const chiResult = isNextPlayer ? canChi(p.hand, tile) : false;
+                const huResult = checkHu([...p.hand, tile]);
 
-            // Chi (Only next player)
-            // Calculate next player index
-            const isNextPlayer = (p.wind === (player.wind + 1) % 4); // Assuming wind is 0,1,2,3 for East, South, West, North
-            // Assuming canChi is defined elsewhere
-            const chi = isNextPlayer && canChi(p.hand, tile);
-
-            // Hu (Any player)
-            // Need to check if p.hand + tile forms a winning hand
-            // checkHu expect array of tiles.
-            const hu = checkHu([...p.hand, tile]);
-
-            if (pong || kong || chi || hu) {
-                pendingActions.push({
-                    playerId: p.id,
-                    canPong: pong,
-                    canKong: kong,
-                    canChi: chi,
-                    canHu: hu
-                });
+                if (pongResult || kongResult || chiResult || huResult) {
+                    pendingActions.push({
+                        playerId: p.id,
+                        canPong: pongResult || false,
+                        canKong: kongResult || false,
+                        canChi: chiResult || false,
+                        canHu: huResult || false
+                    });
+                }
+            } catch (e) {
+                console.error(`Error checking claims for player ${p.id}:`, e);
             }
-        });
+        }
+
+        const updateData: any = {
+            players: newPlayers,
+            lastDrawnTileId: null,
+            lastDiscard: {
+                tile,
+                player: currentPlayerId,
+                timestamp: Date.now()
+            },
+            discardedTiles: [...(mahjongState.discardedTiles || []), tile]
+        };
 
         if (pendingActions.length > 0) {
-            // Wait for action
-            await update(ref(db, `games/${currentGameId}`), {
-                players: newPlayers,
-                pendingAction: {
-                    tile,
-                    fromPlayer: currentPlayerId,
-                    targetPlayers: pendingActions.map(pa => pa.playerId),
-                    actions: pendingActions
-                },
-                lastDiscard: {
-                    tile,
-                    player: currentPlayerId,
-                    timestamp: Date.now()
-                }
-            });
-        } else {
-            // No one can claim, next turn
-            const nextPlayerIndex = (playerIndex + 1) % 4;
-            const nextPlayerId = mahjongState.players[nextPlayerIndex].id;
+            // Priority: Hu(3) > Pong/Kong(2) > Chi(1)
+            const getScore = (pa: any) => {
+                if (pa.canHu) return 3;
+                if (pa.canPong || pa.canKong) return 2;
+                if (pa.canChi) return 1;
+                return 0;
+            };
 
-            await update(ref(db, `games/${currentGameId}`), {
-                players: newPlayers,
-                currentTurn: nextPlayerId,
-                lastDiscard: {
-                    tile,
-                    player: currentPlayerId,
-                    timestamp: Date.now()
-                }
-            });
-        }
-    };
+            const maxScore = Math.max(...pendingActions.map(getScore));
+            const highestPriorityPlayers = pendingActions.filter(pa => getScore(pa) === maxScore);
 
-    const performHu = async () => {
-        if (!mahjongState || !currentGameId || !user) return;
-
-        // Can be from pendingAction (Gun) or self-draw (Zimo)
-        if (mahjongState.pendingAction) {
-            const action = mahjongState.pendingAction.actions.find(a => a.playerId === user.id);
-            if (!action || !action.canHu) return;
-
-            const tile = mahjongState.pendingAction.tile;
-            const playerIndex = mahjongState.players.findIndex(p => p.id === user.id);
-            const player = mahjongState.players[playerIndex];
-
-            const isZimo = false; // Gun (放槍) - someone else discarded
-            const isLastTile = (mahjongState.wall || []).length === 0;
-
-            const scoringResult = calculateScore({
-                player,
-                winningTile: tile,
-                isZimo,
-                isLastTile,
-                isKongDraw: false,
-                prevailingWind: mahjongState.prevailingWind,
-                seatWind: player.wind
-            });
-
-            await update(ref(db, `games/${currentGameId}`), {
-                gameStatus: 'ended',
-                winner: user.id,
-                winningHand: [...(player.hand || []), tile],
-                scoringResult,
-                isZimo,
-                isLastTile,
-                players: mahjongState.players.map(p =>
-                    p.id === user.id ? { ...p, score: p.score + scoringResult.totalPoints } : p
-                )
-            });
-
-            await update(ref(db, `rooms/${currentRoom?.id}`), { status: 'ended' });
-        }
-    };
-
-    // Bot & Human Auto-Draw Logic Loop
-    const botActionInProgress = useRef(false);
-    useEffect(() => {
-        if (!mahjongState || !currentRoom) return;
-
-        const currentPlayerId = mahjongState.currentTurn;
-
-        // 1. Bot Logic
-        if (currentPlayerId.startsWith('bot_') && currentRoom.hostId === user?.id) {
-            if (botActionInProgress.current) return;
-
-            const botIndex = mahjongState.players.findIndex(p => p.id === currentPlayerId);
-            if (botIndex === -1) return;
-            const botPlayer = mahjongState.players[botIndex];
-            const handLen = (botPlayer.hand || []).length;
-
-            let timer: ReturnType<typeof setTimeout>;
-
-            if (handLen % 3 === 1) { // 16 tiles -> need to draw
-                botActionInProgress.current = true;
-                timer = setTimeout(async () => {
-                    await drawMahjongTile();
-                    botActionInProgress.current = false;
-                }, 1000);
-            } else if (handLen % 3 === 2) { // 17 tiles -> need to discard
-                botActionInProgress.current = true;
-                timer = setTimeout(async () => {
-                    const hand = botPlayer.hand || [];
-                    const randomTile = hand[Math.floor(Math.random() * hand.length)];
-                    if (randomTile) await discardMahjongTile(randomTile.id);
-                    botActionInProgress.current = false;
-                }, 1500);
+            let firstTargetId = '';
+            if (maxScore === 3) {
+                // Multiple Hu: Pick the one closest to discarder downstream (playerIndex)
+                highestPriorityPlayers.sort((a, b) => {
+                    const idxA = mahjongState.players.findIndex(p => p.id === a.playerId);
+                    const idxB = mahjongState.players.findIndex(p => p.id === b.playerId);
+                    const distA = (idxA - playerIndex + 4) % 4;
+                    const distB = (idxB - playerIndex + 4) % 4;
+                    return distA - distB;
+                });
+                firstTargetId = highestPriorityPlayers[0].playerId;
+            } else {
+                // Pong/Kong/Chi normally only one player can do these per discard
+                firstTargetId = highestPriorityPlayers[0].playerId;
             }
 
+            updateData.pendingAction = {
+                tile,
+                fromPlayer: currentPlayerId,
+                targetPlayers: [firstTargetId],
+                actions: pendingActions
+            };
+        } else {
+            // No one can claim, advance to next turn
+            const nextPlayerIndex = (playerIndex + 1) % mahjongState.players.length;
+            const nextPlayerId = mahjongState.players[nextPlayerIndex]?.id;
+            updateData.currentTurn = nextPlayerId;
+            updateData.pendingAction = null;
+        }
+
+        try {
+            await update(ref(db, `games/${currentGameId}`), updateData);
+        } catch (e) {
+            console.error('Error updating game state after discard:', e);
+        }
+    };
+
+    // Unified action handlers are defined below in the "Action Handlers" section.
+
+
+    // Bot & Human Mahjong Logic
+    const mahjongBotInProgress = useRef(false);
+
+    // Helper: determine if a player needs to draw or discard
+    // In 16-tile Mahjong: each player starts with 16 tiles.
+    // After melds, hand shrinks. The total tiles accounted for = hand + melds*3.
+    // Need to draw: total == 16 (or any multiple where hand needs +1)
+    // Need to discard: total == 17 (hand has an extra tile to discard)
+    const getPlayerTileState = (player: MahjongPlayer): 'need_draw' | 'need_discard' | 'waiting' => {
+        const hand = (player.hand || []);
+        const meldCount = (player.melds || []).length;
+        const effectiveHandSize = hand.length + meldCount * 3;
+        // 16 → need draw, 17 → need discard
+        if (effectiveHandSize <= 16) return 'need_draw';
+        if (effectiveHandSize >= 17) return 'need_discard';
+        return 'waiting';
+    };
+
+    // Effect 1: Bot auto-respond to pendingAction (Sequential Priority)
+    useEffect(() => {
+        if (!mahjongState || !currentRoom || !user || !currentGameId) return;
+        if (mahjongState.gameStatus !== 'playing') return;
+        if (!mahjongState.pendingAction) return;
+        if (currentRoom.hostId !== user.id) return; // Only host processes bots
+
+        const pa = mahjongState.pendingAction;
+        const currentTargetId = pa.targetPlayers?.[0];
+
+        if (!currentTargetId?.startsWith('bot_')) return;
+
+        const timer = setTimeout(async () => {
+            // Re-fetch state logic or rely on mahjongState update
+            if (!mahjongState?.pendingAction || !currentGameId) return;
+            const updatedPA = mahjongState.pendingAction;
+            // Ensure we are still the target
+            if (updatedPA.targetPlayers?.[0] !== currentTargetId) return;
+
+            const botAction = updatedPA.actions.find(a => a.playerId === currentTargetId);
+            if (!botAction) {
+                if (typeof skipActionForPlayer === 'function') await skipActionForPlayer(currentTargetId);
+                return;
+            }
+
+            // Priority: Hu > Pong/Kong > Chi > Skip
+            if (botAction.canHu) {
+                if (typeof performHuForPlayer === 'function') await performHuForPlayer(currentTargetId);
+                return;
+            }
+            if (botAction.canPong && Math.random() < 0.8) {
+                if (typeof performPongForPlayer === 'function') await performPongForPlayer(currentTargetId);
+                return;
+            }
+            if (botAction.canKong && Math.random() < 0.8) {
+                if (typeof performKongForPlayer === 'function') await performKongForPlayer(currentTargetId, updatedPA.tile);
+                return;
+            }
+            if (botAction.canChi && Math.random() < 0.5) {
+                if (typeof performChiForPlayer === 'function') await performChiForPlayer(currentTargetId, updatedPA.tile);
+                return;
+            }
+
+            if (typeof skipActionForPlayer === 'function') await skipActionForPlayer(currentTargetId);
+        }, 1200);
+
+        return () => clearTimeout(timer);
+    }, [mahjongState?.pendingAction, currentRoom?.hostId, user?.id, currentGameId]);
+
+    // Effect 2: Bot draw/discard & Human auto-draw
+    useEffect(() => {
+        if (!mahjongState || !currentRoom || !currentGameId) return;
+        if (mahjongState.gameStatus !== 'playing') return;
+        if (mahjongState.pendingAction) return; // Don't act while pending action exists
+
+        const currentPlayerId = mahjongState.currentTurn;
+        if (!currentPlayerId) return;
+
+        const playerIndex = mahjongState.players.findIndex(p => p.id === currentPlayerId);
+        if (playerIndex === -1) return;
+        const currentPlayer = mahjongState.players[playerIndex];
+        const tileState = getPlayerTileState(currentPlayer);
+
+        // Bot Logic (host processes bot turns)
+        if (currentPlayerId.startsWith('bot_') && currentRoom.hostId === user?.id) {
+            if (mahjongBotInProgress.current) return;
+            mahjongBotInProgress.current = true;
+
+            const timer = setTimeout(async () => {
+                try {
+                    if (!mahjongState || mahjongState.gameStatus !== 'playing' || mahjongState.pendingAction) {
+                        return;
+                    }
+
+                    const pi = mahjongState.players.findIndex(p => p.id === currentPlayerId);
+                    if (pi === -1) return;
+                    const botPlayer = mahjongState.players[pi];
+                    const state = getPlayerTileState(botPlayer);
+
+                    if (state === 'need_draw') {
+                        // Bot draws AND discards in one atomic operation
+                        const wall = mahjongState.wall || [];
+                        if (wall.length === 0) {
+                            await update(ref(db, `games/${currentGameId}`), {
+                                gameStatus: 'ended',
+                                endReason: 'exhaustive_draw'
+                            });
+                            await update(ref(db, `rooms/${currentRoom?.id}`), { status: 'ended' });
+                            return;
+                        }
+
+                        const newWall = [...wall];
+                        const drawnTile = newWall.pop();
+                        if (!drawnTile) return;
+
+                        const newHand = sortHand([...(botPlayer.hand || []), drawnTile]);
+
+                        // Check Zimo first
+                        if (checkHu(newHand)) {
+                            // Bot wins by self-draw! Just update the state
+                            const newPlayers = [...mahjongState.players];
+                            newPlayers[pi] = { ...botPlayer, hand: newHand };
+                            await update(ref(db, `games/${currentGameId}`), {
+                                wall: newWall,
+                                wallCount: newWall.length,
+                                players: newPlayers,
+                                gameStatus: 'ended',
+                                endReason: 'zimo',
+                                winner: currentPlayerId
+                            });
+                            await update(ref(db, `rooms/${currentRoom?.id}`), { status: 'ended' });
+                            return;
+                        }
+
+                        // Bot discards a random tile from the new hand
+                        const tileToDiscard = newHand[Math.floor(Math.random() * newHand.length)];
+                        const discardHand = newHand.filter(t => t.id !== tileToDiscard.id);
+
+                        const newPlayers = [...mahjongState.players];
+                        newPlayers[pi] = {
+                            ...botPlayer,
+                            hand: sortHand(discardHand),
+                            discarded: [...(botPlayer.discarded || []), tileToDiscard]
+                        };
+
+                        // Check if other players can claim the discard
+                        const pendingActions: {
+                            playerId: string;
+                            canChi?: boolean;
+                            canPong?: boolean;
+                            canKong?: boolean;
+                            canHu?: boolean;
+                        }[] = [];
+
+                        for (const p of mahjongState.players) {
+                            if (p.id === currentPlayerId) continue;
+                            if (!p.hand || p.hand.length === 0) continue;
+                            try {
+                                const pongResult = canPong(p.hand, tileToDiscard);
+                                const kongResult = canKong(p.hand, tileToDiscard);
+                                const isNextPlayer = (p.wind === (botPlayer.wind + 1) % 4);
+                                const chiResult = isNextPlayer ? canChi(p.hand, tileToDiscard) : false;
+                                const huResult = checkHu([...p.hand, tileToDiscard]);
+                                if (pongResult || kongResult || chiResult || huResult) {
+                                    pendingActions.push({
+                                        playerId: p.id,
+                                        canPong: pongResult || false,
+                                        canKong: kongResult || false,
+                                        canChi: chiResult || false,
+                                        canHu: huResult || false
+                                    });
+                                }
+                            } catch (e) {
+                                console.error(`Error checking claims for player ${p.id}:`, e);
+                            }
+                        }
+
+                        const updateData: any = {
+                            wall: newWall,
+                            wallCount: newWall.length,
+                            players: newPlayers,
+                            lastDiscard: {
+                                tile: tileToDiscard,
+                                player: currentPlayerId,
+                                timestamp: Date.now()
+                            },
+                            discardedTiles: [...(mahjongState.discardedTiles || []), tileToDiscard]
+                        };
+
+                        if (pendingActions.length > 0) {
+                            updateData.pendingAction = {
+                                tile: tileToDiscard,
+                                fromPlayer: currentPlayerId,
+                                targetPlayers: pendingActions.map(pa => pa.playerId),
+                                actions: pendingActions
+                            };
+                        } else {
+                            const nextPlayerIndex = (pi + 1) % mahjongState.players.length;
+                            updateData.currentTurn = mahjongState.players[nextPlayerIndex]?.id;
+                            updateData.pendingAction = null;
+                        }
+
+                        await update(ref(db, `games/${currentGameId}`), updateData);
+
+                    } else if (state === 'need_discard') {
+                        // Bot already has 17 tiles, just discard
+                        const hand = botPlayer.hand || [];
+                        if (hand.length > 0) {
+                            const randomTile = hand[Math.floor(Math.random() * hand.length)];
+                            if (randomTile?.id) await discardMahjongTile(randomTile.id);
+                        }
+                    }
+                } catch (e) {
+                    console.error('Bot turn error:', e);
+                } finally {
+                    mahjongBotInProgress.current = false;
+                }
+            }, 1000);
+
             return () => {
-                if (timer) clearTimeout(timer);
+                clearTimeout(timer);
+                mahjongBotInProgress.current = false;
             };
         }
 
-        // 2. Human Auto-Draw Logic
-        if (currentPlayerId === user?.id) {
-            const playerIndex = mahjongState.players.findIndex(p => p.id === user.id);
-            if (playerIndex === -1) return;
-            const player = mahjongState.players[playerIndex];
-
-            // Auto-draw if 16 tiles
-            if ((player.hand || []).length % 3 === 1) {
-                // Small delay for visual clarity
-                const timer = setTimeout(() => {
-                    drawMahjongTile();
-                }, 500);
-                return () => clearTimeout(timer);
-            }
+        // Human auto-draw
+        if (currentPlayerId === user?.id && tileState === 'need_draw') {
+            const timer = setTimeout(() => {
+                drawMahjongTile();
+            }, 400);
+            return () => clearTimeout(timer);
         }
 
-    }, [mahjongState?.currentTurn, currentRoom?.hostId, user?.id]);
+    }, [mahjongState, currentRoom?.hostId, user?.id, currentGameId]);
 
     // Dark Chess Bot Logic
     useEffect(() => {
@@ -1314,43 +1557,80 @@ export const useFirebase = (initialUserId: string | null) => {
 
     // --- Action Handlers ---
 
-    const skipAction = async () => {
-        if (!mahjongState || !currentGameId || !mahjongState.pendingAction) return;
+    const performHuForPlayer = async (playerId: string) => {
+        if (!mahjongState || !currentGameId) return;
+        const pa = mahjongState.pendingAction;
+        const tile = pa ? pa.tile : (mahjongState.lastDiscard?.tile);
+        if (!tile) return;
 
-        // Remove user from targetPlayers
-        const newTargetPlayers = mahjongState.pendingAction.targetPlayers.filter(id => id !== user?.id);
+        const playerIndex = mahjongState.players.findIndex(p => p.id === playerId);
+        const player = mahjongState.players[playerIndex];
+        const isZimo = !pa;
+        const isLastTile = (mahjongState.wallCount || 0) === 0;
 
-        if (newTargetPlayers.length === 0) {
-            // All skipped, proceed to next turn
-            // Need to find original discarder index
-            const discarderId = mahjongState.pendingAction.fromPlayer;
-            const discarderIndex = mahjongState.players.findIndex(p => p.id === discarderId);
-            const nextPlayerIndex = (discarderIndex + 1) % 4;
-            const nextPlayerId = mahjongState.players[nextPlayerIndex].id;
+        const currentDealerIndex = mahjongState.dealer;
+        const currentDealerId = mahjongState.players[currentDealerIndex]?.id;
+        const lianZhuangCount = mahjongState.lianZhuangCount || 0;
 
-            await update(ref(db, `games/${currentGameId}`), {
-                pendingAction: null,
-                currentTurn: nextPlayerId
-            });
-        } else {
-            // Update targetPlayers (waiting for others)
-            await update(ref(db, `games/${currentGameId}/pendingAction`), {
-                targetPlayers: newTargetPlayers
-            });
-        }
+        // Taiwan Rules: Add Zhuang Fan if winner is dealer OR winner took dealer's discard
+        const isDealerWin = playerId === currentDealerId;
+        const isDealerLoss = (pa && pa.fromPlayer === currentDealerId);
+        const shouldAddZhuangFan = !!(isDealerWin || isDealerLoss);
+
+        const scoringResult = calculateScore({
+            player,
+            winningTile: tile,
+            isZimo,
+            isLastTile,
+            isKongDraw: mahjongState.isKongDraw || false,
+            prevailingWind: mahjongState.prevailingWind,
+            seatWind: player.wind,
+            isDealer: shouldAddZhuangFan,
+            lianZhuangCount: lianZhuangCount
+        });
+
+        const fromPlayerId = pa?.fromPlayer || '';
+
+        const updatedPlayers = mahjongState.players.map((p: any) => {
+            let newScore = p.score || 0;
+            if (p.id === playerId) {
+                // Winner gets points
+                if (isZimo) {
+                    newScore += scoringResult.totalPoints * 3;
+                } else {
+                    newScore += scoringResult.totalPoints;
+                }
+            } else if (isZimo) {
+                // Everyone else pays if Zimo
+                newScore -= scoringResult.totalPoints;
+            } else if (p.id === fromPlayerId) {
+                // Discarder pays if Rong
+                newScore -= scoringResult.totalPoints;
+            }
+            return { ...p, score: newScore };
+        });
+
+        await update(ref(db, `games/${currentGameId}`), {
+            gameStatus: 'ended',
+            endReason: 'hu',
+            winner: playerId,
+            winningHand: [...(player.hand || []), tile],
+            scoringResult,
+            isZimo,
+            isLastTile,
+            players: updatedPlayers
+        });
+        await update(ref(db, `rooms/${currentRoom?.id}`), { status: 'ended' });
     };
 
-    const performPong = async () => {
-        if (!mahjongState || !currentGameId || !mahjongState.pendingAction || !user) return;
-        // Verify user can Pong
-        const action = mahjongState.pendingAction.actions.find(a => a.playerId === user.id);
-        if (!action || !action.canPong) return;
+    const performHu = () => user && performHuForPlayer(user.id);
 
+    const performPongForPlayer = async (playerId: string) => {
+        if (!mahjongState || !currentGameId || !mahjongState.pendingAction) return;
         const tile = mahjongState.pendingAction.tile;
-        const playerIndex = mahjongState.players.findIndex(p => p.id === user.id);
+        const playerIndex = mahjongState.players.findIndex(p => p.id === playerId);
         const player = mahjongState.players[playerIndex];
 
-        // Remove 2 matching tiles from hand
         const newHand = [...(player.hand || [])];
         let removed = 0;
         for (let i = newHand.length - 1; i >= 0; i--) {
@@ -1361,134 +1641,271 @@ export const useFirebase = (initialUserId: string | null) => {
             }
         }
 
+        const fromPlayerId = mahjongState.pendingAction.fromPlayer;
+        const fromPlayerIndex = mahjongState.players.findIndex(p => p.id === fromPlayerId);
+
         const newMeld: any = {
             type: 'pong',
-            tiles: [tile, tile, tile], // 2 from hand + 1 discarded
-            fromPlayer: mahjongState.pendingAction.fromPlayer
+            tiles: [tile, tile, tile],
+            fromPlayer: fromPlayerId
         };
 
         const newPlayers = [...mahjongState.players];
-        newPlayers[playerIndex] = {
-            ...player,
-            hand: newHand,
-            melds: [...(player.melds || []), newMeld]
-        };
+        newPlayers[playerIndex] = { ...player, hand: sortHand(newHand), melds: [...(player.melds || []), newMeld] };
+
+        // Remove from fromPlayer's discarded list
+        if (fromPlayerIndex !== -1) {
+            const fromP = newPlayers[fromPlayerIndex];
+            const newDiscarded = (fromP.discarded || []).filter(t => t.id !== tile.id);
+            newPlayers[fromPlayerIndex] = { ...fromP, discarded: newDiscarded };
+        }
 
         await update(ref(db, `games/${currentGameId}`), {
             players: newPlayers,
             pendingAction: null,
-            currentTurn: user.id // Turn shifts to Ponger
+            currentTurn: playerId,
+            lastDrawnTileId: null,
+            discardedTiles: (mahjongState.discardedTiles || []).filter((t: any) => t.id !== tile.id)
         });
     };
 
-    const performKong = async () => {
-        if (!mahjongState || !currentGameId || !mahjongState.pendingAction || !user) return;
-        // Verify user can Kong
-        const action = mahjongState.pendingAction.actions.find(a => a.playerId === user.id);
-        if (!action || !action.canKong) return;
+    const performPong = () => user && performPongForPlayer(user.id);
 
-        const tile = mahjongState.pendingAction.tile;
-        const playerIndex = mahjongState.players.findIndex(p => p.id === user.id);
+    const performKongForPlayer = async (playerId: string, tile?: MahjongTile) => {
+
+        if (!mahjongState || !currentGameId) return;
+        const targetTile = tile || (mahjongState.pendingAction?.tile);
+        if (!targetTile) return;
+
+        const playerIndex = mahjongState.players.findIndex(p => p.id === playerId);
         const player = mahjongState.players[playerIndex];
 
-        // Remove 3 matching tiles
         const newHand = [...(player.hand || [])];
         let removed = 0;
         for (let i = newHand.length - 1; i >= 0; i--) {
-            if (newHand[i].suit === tile.suit && newHand[i].value === tile.value) {
+            if (newHand[i].suit === targetTile.suit && newHand[i].value === targetTile.value) {
                 newHand.splice(i, 1);
                 removed++;
                 if (removed === 3) break;
             }
         }
 
+        const fromPlayerId = mahjongState.pendingAction?.fromPlayer || playerId;
+        const fromPlayerIndex = mahjongState.players.findIndex(p => p.id === fromPlayerId);
+
         const newMeld: any = {
             type: 'kong',
-            tiles: [tile, tile, tile, tile],
-            fromPlayer: mahjongState.pendingAction.fromPlayer
+            tiles: [targetTile, targetTile, targetTile, targetTile],
+            fromPlayer: fromPlayerId
         };
 
         const newPlayers = [...mahjongState.players];
-        newPlayers[playerIndex] = {
-            ...player,
-            hand: newHand,
-            melds: [...(player.melds || []), newMeld]
+        newPlayers[playerIndex] = { ...player, hand: sortHand(newHand), melds: [...(player.melds || []), newMeld] };
+
+        // Remove from fromPlayer's discarded list (if it was from a discard)
+        if (mahjongState.pendingAction && fromPlayerIndex !== -1) {
+            const fromP = newPlayers[fromPlayerIndex];
+            const newDiscarded = (fromP.discarded || []).filter(t => t.id !== targetTile.id);
+            newPlayers[fromPlayerIndex] = { ...fromP, discarded: newDiscarded };
+        }
+
+        const updateData: any = {
+            players: newPlayers,
+            pendingAction: null,
+            currentTurn: playerId,
+            discardedTiles: (mahjongState.discardedTiles || []).filter((t: any) => t.id !== targetTile.id)
         };
 
-        // Kong: Draw a replacement tile (Gang Shang Hua)
         if (mahjongState.wall.length > 0) {
             const newWall = [...mahjongState.wall];
-            const replacementTile = newWall.pop();
+            // Taiwan 16-tile Mahjong: Kong补牌 (Replacement) is taken from the "tail" of the dead wall
+            // If pop() is head, shift() is tail.
+            const replacementTile = newWall.shift();
             if (replacementTile) {
-                newPlayers[playerIndex].hand.push(replacementTile);
+                newPlayers[playerIndex].hand = sortHand([...newPlayers[playerIndex].hand, replacementTile]);
                 await update(ref(db, `games/${currentGameId}`), {
+                    ...updateData,
                     wall: newWall,
                     wallCount: newWall.length,
-                    players: newPlayers,
-                    pendingAction: null,
-                    currentTurn: user.id
+                    lastDrawnTileId: replacementTile.id,
+                    isKongDraw: true
                 });
                 return;
             }
         }
 
         await update(ref(db, `games/${currentGameId}`), {
-            players: newPlayers,
-            pendingAction: null,
-            currentTurn: user.id
+            ...updateData,
+            lastDrawnTileId: null
         });
     };
 
-    const performChi = async () => {
-        if (!mahjongState || !currentGameId || !mahjongState.pendingAction || !user) return;
-        const action = mahjongState.pendingAction.actions.find(a => a.playerId === user.id);
-        if (!action || !action.canChi) return;
+    const performKong = () => user && performKongForPlayer(user.id);
 
-        const tile = mahjongState.pendingAction.tile;
-        const playerIndex = mahjongState.players.findIndex(p => p.id === user.id);
+    const performChiForPlayer = async (playerId: string, tile?: MahjongTile) => {
+
+        if (!mahjongState || !currentGameId) return;
+        const targetTile = tile || (mahjongState.pendingAction?.tile);
+        if (!targetTile) return;
+
+        const playerIndex = mahjongState.players.findIndex(p => p.id === playerId);
         const player = mahjongState.players[playerIndex];
 
-        // Logic to find which tiles to eat (Simplified Greedy)
-        const v = tile.value;
-        const hand = player.hand || [];
-        const has = (val: number) => hand.find(t => t.suit === tile.suit && t.value === val);
+        const chiOptions = findChiTiles(player.hand || [], targetTile);
+        if (chiOptions.length === 0) return;
 
-        let tilesToEat: any[] = [];
-
-        if (has(v - 1) && has(v + 1)) {
-            tilesToEat = [has(v - 1), has(v + 1)];
-        } else if (has(v - 2) && has(v - 1)) {
-            tilesToEat = [has(v - 2), has(v - 1)];
-        } else if (has(v + 1) && has(v + 2)) {
-            tilesToEat = [has(v + 1), has(v + 2)];
+        const tilesToUse = chiOptions[0];
+        const newHand = [...(player.hand || [])];
+        for (const t of tilesToUse) {
+            const idx = newHand.findIndex(h => h.id === t.id);
+            if (idx !== -1) newHand.splice(idx, 1);
         }
 
-        if (tilesToEat.length !== 2) return;
-
-        const newHand = [...(player.hand || [])];
-        tilesToEat.forEach(t => {
-            const idx = newHand.findIndex(ht => ht.id === t.id);
-            if (idx !== -1) newHand.splice(idx, 1);
-        });
+        const fromPlayerId = mahjongState.pendingAction?.fromPlayer || '';
+        const fromPlayerIndex = mahjongState.players.findIndex(p => p.id === fromPlayerId);
 
         const newMeld: any = {
             type: 'chow',
-            tiles: [...tilesToEat, tile].sort((a, b) => a.value - b.value),
-            fromPlayer: mahjongState.pendingAction.fromPlayer
+            tiles: sortHand([...tilesToUse, targetTile]),
+            fromPlayer: fromPlayerId
         };
 
         const newPlayers = [...mahjongState.players];
-        newPlayers[playerIndex] = {
-            ...player,
-            hand: newHand,
-            melds: [...(player.melds || []), newMeld]
-        };
+        newPlayers[playerIndex] = { ...player, hand: sortHand(newHand), melds: [...(player.melds || []), newMeld] };
+
+        // Remove from fromPlayer's discarded list
+        if (fromPlayerIndex !== -1) {
+            const fromP = newPlayers[fromPlayerIndex];
+            const newDiscarded = (fromP.discarded || []).filter(t => t.id !== targetTile.id);
+            newPlayers[fromPlayerIndex] = { ...fromP, discarded: newDiscarded };
+        }
 
         await update(ref(db, `games/${currentGameId}`), {
             players: newPlayers,
             pendingAction: null,
-            currentTurn: user.id
+            currentTurn: playerId,
+            lastDrawnTileId: null,
+            discardedTiles: (mahjongState.discardedTiles || []).filter((t: any) => t.id !== targetTile.id)
         });
+    };
+
+    const performChi = () => user && performChiForPlayer(user.id);
+
+    const skipActionForPlayer = async (playerId: string) => {
+        if (!mahjongState || !currentGameId || !mahjongState.pendingAction) return;
+
+        const pa = mahjongState.pendingAction;
+        const discarderId = pa.fromPlayer;
+        const discarderIndex = mahjongState.players.findIndex(p => p.id === discarderId);
+
+        const remainingActions = pa.actions.filter(a => a.playerId !== playerId);
+
+        if (remainingActions.length === 0) {
+            // No more actions
+            if (pa.fromPlayer === playerId) {
+                // Self-draw (Zimo) skip: Stay in turn to discard
+                await update(ref(db, `games/${currentGameId}`), {
+                    pendingAction: null
+                });
+            } else {
+                // Claim skip: advance to next player's draw
+                const nextPlayerId = mahjongState.players[(discarderIndex + 1) % 4].id;
+                await update(ref(db, `games/${currentGameId}`), {
+                    pendingAction: null,
+                    currentTurn: nextPlayerId
+                });
+            }
+        } else {
+            // Pick next priority actor
+            const getScore = (a: any) => { if (a.canHu) return 3; if (a.canPong || a.canKong) return 2; if (a.canChi) return 1; return 0; };
+            const maxRem = Math.max(...remainingActions.map(getScore));
+            const bestPlayers = remainingActions.filter(a => getScore(a) === maxRem);
+
+            let nextActorId = bestPlayers[0].playerId;
+            if (maxRem === 3) {
+                bestPlayers.sort((a, b) => {
+                    const idxA = mahjongState.players.findIndex(p => p.id === a.playerId);
+                    const idxB = mahjongState.players.findIndex(p => p.id === b.playerId);
+                    return ((idxA - discarderIndex + 4) % 4) - ((idxB - discarderIndex + 4) % 4);
+                });
+                nextActorId = bestPlayers[0].playerId;
+            }
+            await update(ref(db, `games/${currentGameId}/pendingAction`), {
+                targetPlayers: [nextActorId],
+                actions: remainingActions
+            });
+        }
+    };
+
+    const skipAction = () => user && skipActionForPlayer(user.id);
+
+
+
+
+    const startNextRound = async () => {
+        if (!mahjongState || !currentGameId || !currentRoom || !user) return;
+        if (mahjongState.gameStatus !== 'ended') return;
+        if (currentRoom.hostId !== user.id) return; // Only host starts next round
+
+        const currentDealerId = mahjongState.players[mahjongState.dealer]?.id;
+        const dealerWon = mahjongState.winner === currentDealerId;
+        const isDraw = mahjongState.endReason === 'exhaustive_draw';
+        const isLianZhuang = dealerWon || isDraw;
+
+        let nextDealer = mahjongState.dealer;
+        let nextRound = mahjongState.round || 1;
+        let nextLianZhuangCount = (mahjongState.lianZhuangCount || 0);
+
+        if (isLianZhuang) {
+            nextLianZhuangCount += 1;
+        } else {
+            nextDealer = (mahjongState.dealer + 1) % 4;
+            nextRound += 1;
+            nextLianZhuangCount = 0;
+        }
+
+        const totalRounds = mahjongState.totalRounds || 16;
+
+        if (nextRound > totalRounds) {
+            // All rounds complete
+            return;
+        }
+
+        // Prevailing wind changes every 4 successful rounds (dealer passes)
+        const nextPrevailingWind = Math.floor((nextRound - 1) / 4) % 4;
+
+        // Re-deal tiles
+        const tiles = shuffleTiles(initializeMahjongDeck());
+        const { hands, wall } = dealTiles(tiles);
+
+        // Preserve scores, rotate winds based on new dealer
+        const newPlayers: MahjongPlayer[] = mahjongState.players.map((p, index) => ({
+            id: p.id,
+            name: p.name,
+            wind: (index - nextDealer + 4) % 4, // wind relative to dealer
+            hand: hands[index],
+            melds: [],
+            discarded: [],
+            score: p.score // keep accumulated score
+        }));
+
+        const newRoundState: MahjongGameState = {
+            players: newPlayers,
+            wall,
+            wallCount: wall.length,
+            currentTurn: newPlayers[nextDealer].id, // Dealer starts
+            dice: [1, 1, 1],
+            prevailingWind: nextPrevailingWind,
+            dealer: nextDealer,
+            gameStatus: 'playing',
+            round: nextRound,
+            totalRounds,
+            discardedTiles: [],
+            lianZhuangCount: nextLianZhuangCount
+        };
+
+        await set(ref(db, `games/${currentGameId}`), newRoundState);
+        await update(ref(db, `rooms/${currentRoom.id}`), { status: 'playing' });
     };
 
     return {
@@ -1525,6 +1942,7 @@ export const useFirebase = (initialUserId: string | null) => {
         performKong,
         performHu,
         skipAction,
+        startNextRound,
         toggleReady,
         playBigTwoCards,
         passBigTwoTurn

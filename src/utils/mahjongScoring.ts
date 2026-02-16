@@ -134,10 +134,12 @@ export interface ScoringContext {
     isKongDraw: boolean;        // 槓上開花 (won from replacement draw after kong)
     prevailingWind: number;     // 圈風 (0=East, 1=South, 2=West, 3=North)
     seatWind: number;           // 門風 (player's wind seat)
+    isDealer: boolean;          // 是否為莊家
+    lianZhuangCount: number;    // 連莊次數
 }
 
 export function calculateScore(ctx: ScoringContext): ScoringResult {
-    const { player, winningTile, isZimo, isLastTile, isKongDraw, prevailingWind, seatWind } = ctx;
+    const { player, winningTile, isZimo, isLastTile, isKongDraw, prevailingWind, seatWind, isDealer, lianZhuangCount } = ctx;
 
     const hand = [...(player.hand || [])];
     const melds = [...(player.melds || [])];
@@ -356,6 +358,18 @@ export function calculateScore(ctx: ScoringContext): ScoringResult {
         // --- 18. 槓上開花 (1台) ---
         if (isKongDraw) {
             currentItems.push({ name: '槓上開花', fan: 1, description: '槓牌後補牌胡牌' });
+        }
+
+        // --- 19. 莊家/連莊 (1台 + 2n台) ---
+        // 台灣麻將規則：莊家 1台，連n拉n額外加 2n台
+        if (isDealer) {
+            const lianFan = lianZhuangCount * 2;
+            const totalZhuangFan = 1 + lianFan;
+            currentItems.push({
+                name: lianZhuangCount > 0 ? `莊家 (連${lianZhuangCount}拉${lianZhuangCount})` : '莊家',
+                fan: totalZhuangFan,
+                description: lianZhuangCount > 0 ? `莊家1台 + 連${lianZhuangCount}2n台` : '莊家1台'
+            });
         }
 
         // --- 19. 全求人 (2台) ---
