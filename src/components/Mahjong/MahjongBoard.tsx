@@ -82,7 +82,8 @@ export const MahjongBoard: React.FC<MahjongBoardProps> = ({
     onPong, onKong, onChi, onHu, onSkip, onExit
 }) => {
     const selfIndex = gameState?.players?.findIndex(p => p.id === currentUserId) ?? -1;
-    const viewIndex = selfIndex === -1 ? 0 : selfIndex;
+    const isSpectator = selfIndex === -1;
+    const viewIndex = isSpectator ? 0 : selfIndex;
 
     const getPlayer = (offset: number) => {
         if (!gameState?.players) return { id: '', name: '?', wind: 0, hand: [] as MahjongTileType[], melds: [] as MahjongMeld[], discarded: [] as MahjongTileType[], score: 0 };
@@ -103,7 +104,7 @@ export const MahjongBoard: React.FC<MahjongBoardProps> = ({
     const left = getPlayer(3);
 
     const windNames = ['東', '南', '西', '北'];
-    const isMyTurn = gameState?.currentTurn === self.id;
+    const isMyTurn = !isSpectator && gameState?.currentTurn === self.id;
     const meldCount = (self.melds || []).length;
     const effectiveSize = self.hand.length + meldCount * 3;
     const canDiscard = isMyTurn && effectiveSize >= 17 && !gameState?.pendingAction;
@@ -353,7 +354,7 @@ export const MahjongBoard: React.FC<MahjongBoardProps> = ({
                 </div>
 
                 <div className={`text-white text-sm font-bold px-4 py-0.5 rounded-full flex items-center gap-3 ${isMyTurn ? 'bg-yellow-600/80 animate-turn-blink' : 'bg-black/50'}`}>
-                    <span>{self.name} {isMyTurn ? '(你的回合)' : ''}</span>
+                    <span>{self.name} {isMyTurn ? '(你的回合)' : isSpectator ? '(觀察中)' : ''}</span>
                     <span className={`px-2 rounded bg-black/40 ${self.score > 0 ? 'text-green-400' : self.score < 0 ? 'text-red-400' : 'text-gray-400'}`}>
                         目前累積: {self.score > 0 ? '+' : ''}{self.score || 0} 台
                     </span>

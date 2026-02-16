@@ -135,7 +135,13 @@ export const useFirebase = (initialUserId: string | null) => {
                         r.spectators.some(s => s.id === user.id)
                     );
                     setCurrentRoom(myRoom || null);
-                    if (myRoom) setIsInLobby(false);
+                    if (myRoom) {
+                        setIsInLobby(false);
+                        // Sync game ID if room is playing
+                        if (myRoom.activeGameId && currentGameId !== myRoom.activeGameId) {
+                            setCurrentGameId(myRoom.activeGameId);
+                        }
+                    }
                 }
             } else {
                 setRooms([]);
@@ -426,7 +432,10 @@ export const useFirebase = (initialUserId: string | null) => {
             };
 
             await set(ref(db, `games/${gameId}`), newBigTwoGame);
-            await update(ref(db, `rooms/${currentRoom.id}`), { status: 'playing' });
+            await update(ref(db, `rooms/${currentRoom.id}`), {
+                status: 'playing',
+                activeGameId: gameId
+            });
             currentRoom.players.forEach(p => {
                 update(ref(db, `users/${p.id}`), { activeGameId: gameId });
             });
@@ -441,6 +450,7 @@ export const useFirebase = (initialUserId: string | null) => {
             await set(ref(db, `games/${gameId}`), newGame);
             await update(ref(db, `rooms/${currentRoom.id}`), {
                 status: 'playing',
+                activeGameId: gameId,
             });
             // Update all players activeGameId
             currentRoom.players.forEach(p => {
@@ -451,6 +461,7 @@ export const useFirebase = (initialUserId: string | null) => {
             await set(ref(db, `games/${gameId}`), newMahjongGame);
             await update(ref(db, `rooms/${currentRoom.id}`), {
                 status: 'playing',
+                activeGameId: gameId,
             });
             currentRoom.players.forEach(p => {
                 update(ref(db, `users/${p.id}`), { activeGameId: gameId });
@@ -461,6 +472,7 @@ export const useFirebase = (initialUserId: string | null) => {
             // Just set the status to playing so they see the "開發中" screen
             await update(ref(db, `rooms/${currentRoom.id}`), {
                 status: 'playing',
+                activeGameId: gameId,
             });
             currentRoom.players.forEach(p => {
                 update(ref(db, `users/${p.id}`), { activeGameId: gameId });
@@ -754,7 +766,8 @@ export const useFirebase = (initialUserId: string | null) => {
             const resetPlayers = (currentRoom.players || []).map(p => ({ ...p, isReady: false }));
             await update(ref(db, `rooms/${currentRoom.id}`), {
                 status: 'waiting',
-                players: resetPlayers
+                players: resetPlayers,
+                activeGameId: null
             });
         }
     };

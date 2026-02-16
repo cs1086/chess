@@ -72,8 +72,8 @@ export const Lobby: React.FC<LobbyProps> = ({
                     <button
                         onClick={() => setFilterType('all')}
                         className={`px-4 py-2 rounded-full whitespace-nowrap transition ${filterType === 'all'
-                                ? 'bg-[#5c3a1e] text-white shadow-md'
-                                : 'bg-[#e8d5c4] text-[#8b5a2b] hover:bg-[#dcc0a3]'
+                            ? 'bg-[#5c3a1e] text-white shadow-md'
+                            : 'bg-[#e8d5c4] text-[#8b5a2b] hover:bg-[#dcc0a3]'
                             }`}
                     >
                         全部遊戲
@@ -83,8 +83,8 @@ export const Lobby: React.FC<LobbyProps> = ({
                             key={key}
                             onClick={() => setFilterType(key as GameType)}
                             className={`px-4 py-2 rounded-full whitespace-nowrap transition ${filterType === key
-                                    ? 'bg-[#5c3a1e] text-white shadow-md'
-                                    : 'bg-[#e8d5c4] text-[#8b5a2b] hover:bg-[#dcc0a3]'
+                                ? 'bg-[#5c3a1e] text-white shadow-md'
+                                : 'bg-[#e8d5c4] text-[#8b5a2b] hover:bg-[#dcc0a3]'
                                 }`}
                         >
                             {config.name}
@@ -104,8 +104,13 @@ export const Lobby: React.FC<LobbyProps> = ({
                             <div key={room.id} className="bg-white rounded-xl shadow-md border-2 border-[#e8d5c4] hover:border-[#dcc0a3] transition overflow-hidden flex flex-col">
                                 <div className="p-5 flex-1">
                                     <div className="flex justify-between items-start mb-4">
-                                        <div className="bg-[#f0e4d4] px-3 py-1 rounded-lg text-xs font-bold text-[#8b5a2b]">
-                                            {GAME_CONFIGS[room.gameType].name}
+                                        <div className="flex flex-col gap-1">
+                                            <div className="bg-[#f0e4d4] px-3 py-1 rounded-lg text-xs font-bold text-[#8b5a2b] inline-block">
+                                                {GAME_CONFIGS[room.gameType].name}
+                                            </div>
+                                            <div className={`text-[10px] font-bold px-2 py-0.5 rounded-full inline-block ${room.status === 'playing' ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'}`}>
+                                                {room.status === 'playing' ? '● 遊戲中' : '● 等待中'}
+                                            </div>
                                         </div>
                                         {room.password && <Lock size={16} className="text-[#8b5a2b]" />}
                                     </div>
@@ -155,17 +160,19 @@ export const Lobby: React.FC<LobbyProps> = ({
                                     ) : (
                                         <button
                                             onClick={() => handleJoinClick(room)}
-                                            disabled={room.players.length >= room.maxPlayers && (!room.allowSpectators)}
-                                            className={`w-full py-3 rounded-lg font-bold transition flex justify-center items-center gap-2 ${room.players.length >= room.maxPlayers
+                                            disabled={room.status === 'playing' ? !room.allowSpectators : room.players.length >= room.maxPlayers}
+                                            className={`w-full py-3 rounded-lg font-bold transition flex justify-center items-center gap-2 ${room.status === 'playing'
                                                     ? room.allowSpectators
-                                                        ? 'bg-[#e8d5c4] text-[#8b5a2b] hover:bg-[#dcc0a3]'
+                                                        ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-md'
                                                         : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                                                    : 'bg-[#5c3a1e] text-white hover:bg-[#4a2e18]'
+                                                    : room.players.length >= room.maxPlayers
+                                                        ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                                        : 'bg-[#5c3a1e] text-white hover:bg-[#4a2e18]'
                                                 }`}
                                         >
-                                            {room.players.length >= room.maxPlayers
-                                                ? room.allowSpectators ? '觀戰' : '房間已滿'
-                                                : '加入房間'
+                                            {room.status === 'playing'
+                                                ? room.allowSpectators ? '觀戰' : '遊戲進行中'
+                                                : room.players.length >= room.maxPlayers ? '房間已滿' : '加入房間'
                                             }
                                         </button>
                                     )}

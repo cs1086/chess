@@ -104,6 +104,7 @@ export interface Room {
   status: 'waiting' | 'playing' | 'ended';
   createdAt: number;
   name?: string; // Optional room name
+  activeGameId?: string;
 }
 
 // --- Mahjong Types ---
