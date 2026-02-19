@@ -743,10 +743,73 @@ export const useFirebase = (initialUserId: string | null) => {
         updateStats(winner, 'surrender');
     };
 
-    const requestRematch = () => {
-        // Logic needs to adapt to room system (restart game in room)
-        // For now keep simple
-        alert("Rematch not fully refactored for room system yet");
+    const requestRematch = async () => {
+        if (!user || !currentRoom) return;
+
+        // For dark chess, just start a new game in the same room
+        if (currentRoom.gameType === 'chinese_dark_chess') {
+            const activePlayers = currentRoom.players.filter(p => p.id && !p.id.startsWith('bot_'));
+
+            // Fill with bots if needed
+            let allPlayers = [...activePlayers];
+            if (currentRoom.fillWithBots) {
+                const config = GAME_CONFIGS[currentRoom.gameType];
+                const needed = (config?.maxPlayers || 2) - allPlayers.length;
+                for (let i = 0; i < needed; i++) {
+                    const botId = `bot_${Date.now()}_${i}`;
+                    allPlayers.push({
+                        id: botId,
+                        name: `電腦玩家 ${i + 1}`,
+                        wins: 0,
+                        losses: 0,
+                        isOnline: true,
+                        activeGameId: '',
+                        inChatRoom: false,
+                        surrenders: 0,
+                        runaways: 0,
+                        rejections: 0,
+                        lastOnline: Date.now()
+                    });
+                }
+            }
+
+            if (allPlayers.length < 2) {
+                alert('人數不足，無法再戰一局');
+                return;
+            }
+
+            const gameId = `game_${currentRoom.id}_${Date.now()}`;
+            const initialBoard = initializeBoard();
+
+            const p1 = allPlayers[0];
+            const p2 = allPlayers[1];
+            const p1IsRed = Math.random() > 0.5;
+
+            const newGame: GameState = {
+                board: initialBoard,
+                currentPlayer: Math.random() > 0.5 ? 'red' : 'black',
+                players: {
+                    red: p1IsRed ? { ...p1, wins: 0, losses: 0 } : { ...p2, wins: 0, losses: 0 },
+                    black: !p1IsRed ? { ...p1, wins: 0, losses: 0 } : { ...p2, wins: 0, losses: 0 }
+                },
+                gameStatus: 'playing',
+                turnStartTime: Date.now(),
+                isColorAssigned: false
+            };
+
+            await set(ref(db, `games/${gameId}`), newGame);
+            await update(ref(db, `rooms/${currentRoom.id}`), {
+                status: 'playing',
+                activeGameId: gameId,
+            });
+            currentRoom.players.forEach(p => {
+                update(ref(db, `users/${p.id}`), { activeGameId: gameId });
+            });
+            setCurrentGameId(gameId);
+        } else {
+            // For other game types, exit to room and let players ready up again
+            await exitGame();
+        }
     };
 
     const exitGame = async () => {

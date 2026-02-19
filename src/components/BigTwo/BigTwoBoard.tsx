@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import type { BigTwoGameState, BigTwoCard as BigTwoCardType } from '../../types';
 import { BigTwoCardComponent } from './BigTwoCard';
-import { detectHandType, SUIT_SYMBOLS, RANK_NAMES } from '../../utils/bigTwoLogic';
+import { detectHandType, SUIT_SYMBOLS, RANK_NAMES, sortHand } from '../../utils/bigTwoLogic';
 
 interface BigTwoBoardProps {
     gameState: BigTwoGameState;
@@ -40,7 +40,12 @@ export const BigTwoBoard: React.FC<BigTwoBoardProps> = ({
         };
     };
 
-    const self = getPlayer(0);
+    const selfRaw = getPlayer(0);
+    // Sort hand for display: rank ascending (3→K→A→2), suit: clubs→diamonds→hearts→spades
+    const self = useMemo(() => ({
+        ...selfRaw,
+        hand: sortHand(selfRaw.hand)
+    }), [selfRaw]);
     const playerCount = gameState.players.length;
 
     // For 4 players: right=1, top=2, left=3
@@ -97,7 +102,7 @@ export const BigTwoBoard: React.FC<BigTwoBoardProps> = ({
     return (
         <div className="w-full flex flex-col items-center select-none">
             {/* Game Table */}
-            <div className="relative w-full max-w-4xl h-[600px] md:h-[700px] bg-gradient-to-b from-[#1a6b1a] to-[#0d4d0d] rounded-3xl shadow-2xl border-8 border-[#3e2723] overflow-hidden">
+            <div className="relative w-full max-w-4xl min-h-[650px] md:min-h-[750px] bg-gradient-to-b from-[#1a6b1a] to-[#0d4d0d] rounded-3xl shadow-2xl border-8 border-[#3e2723]">
 
                 {/* Felt texture overlay */}
                 <div className="absolute inset-0 opacity-10 bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0IiBoZWlnaHQ9IjQiPjxyZWN0IHdpZHRoPSIxIiBoZWlnaHQ9IjEiIGZpbGw9IiMwMDAiIG9wYWNpdHk9IjAuMSIvPjwvc3ZnPg==')]" />
@@ -207,7 +212,7 @@ export const BigTwoBoard: React.FC<BigTwoBoardProps> = ({
                 )}
 
                 {/* Self hand */}
-                <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 flex flex-col items-center w-full px-4">
+                <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 flex flex-col items-center w-full px-4">
                     {/* Player info */}
                     <div className="flex items-center gap-2 mb-2">
                         <div className={`w-3 h-3 rounded-full ${isMyTurn ? 'bg-yellow-400 animate-pulse' : 'bg-gray-600'}`} />
